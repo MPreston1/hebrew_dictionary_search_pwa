@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Milon — Morfix Search</title>
+<meta name="theme-color" content="#1B2A4A" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Milon" />
+<link id="manifest-link" rel="manifest" />
+
+<style>
+  :root {
+    --ink: #1B2A4A;
+    --ink-soft: #3C4C74;
+    --paper: #EFE6D8;
+    --paper-card: #F8F3E9;
+    --brass: #B08D57;
+    --brass-dim: #D9C39B;
+    --line: #D8CBB0;
+    --error: #A23E3E;
+    --font-display: 'Frank Ruhl Libre', 'Georgia', serif;
+    --font-body: 'Assistant', 'Segoe UI', sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    min-height: 100vh;
+  }
+
+  .shell {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 28px 20px 80px;
+  }
+
+  header.masthead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 3px double var(--brass);
+    padding-bottom: 14px;
+    margin-bottom: 24px;
+  }
+
+  header.masthead h1 {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.01em;
+  }
+
+  header.masthead h1 .heb {
+    color: var(--brass);
+    font-size: 1.1rem;
+    margin-inline-start: 10px;
+    font-weight: 500;
+  }
+
+  .gear {
+    background: none;
+    border: 1px solid var(--brass-dim);
+    border-radius: 50%;
+    width: 38px;
+    height: 38px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--ink-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+  }
+  .gear:hover { background: var(--brass-dim); }
+  .gear:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  form.search-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    padding: 12px 16px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--paper-card);
+    color: var(--ink);
+  }
+  input[type="text"]:dir(rtl) { text-align: right; }
+
+  button.go {
+    font-family: var(--font-body);
+    font-weight: 600;
+    background: var(--ink);
+    color: var(--paper-card);
+    border: none;
+    border-radius: 4px;
+    padding: 0 22px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  button.go:hover { background: var(--ink-soft); }
+  button.go:disabled { opacity: 0.5; cursor: default; }
+
+  .status-line {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    min-height: 1.2em;
+    margin-bottom: 20px;
+  }
+  .status-line.error { color: var(--error); }
+
+  .gloss-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+    margin-bottom: 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .gloss-toggle input { cursor: pointer; }
+
+  .entry-card {
+    background: var(--paper-card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .entry-tab {
+    position: absolute;
+    top: 0;
+    inset-inline-end: 0;
+    background: var(--brass);
+    color: var(--paper-card);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    padding: 3px 10px;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+  }
+  .entry-tab:dir(rtl) { border-bottom-left-radius: 0; border-bottom-right-radius: 6px; }
+
+  .entry-body { padding: 20px 22px; }
+
+  .headword-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+
+  .headword {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    font-weight: 600;
+  }
+
+  .pos-tag {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--brass);
+    border: 1px solid var(--brass-dim);
+    border-radius: 3px;
+    padding: 1px 7px;
+  }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ink-soft);
+    margin: 14px 0 6px;
+  }
+
+  ul.sense-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  ul.sense-list li {
+    padding: 6px 0;
+    border-top: 1px solid var(--line);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+  ul.sense-list li:first-child { border-top: none; }
+
+  .sense-display {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+  }
+  .sense-gloss {
+    font-family: var(--font-body);
+    color: var(--ink-soft);
+  }
+  .sense-def {
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    font-style: italic;
+    flex-basis: 100%;
+  }
+
+  .suggestions-box {
+    background: var(--paper-card);
+    border: 1px dashed var(--brass-dim);
+    border-radius: 6px;
+    padding: 18px 22px;
+  }
+  .suggestions-box .section-label { margin-top: 0; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-family: var(--font-body);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 5px 14px;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+  .chip:hover { border-color: var(--brass); color: var(--brass); }
+
+  .empty-state {
+    text-align: center;
+    color: var(--ink-soft);
+    padding: 60px 20px;
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+  }
+
+  dialog#settings-dialog {
+    border: none;
+    border-radius: 8px;
+    padding: 0;
+    max-width: 460px;
+    width: 90%;
+    color: var(--ink);
+    font-family: var(--font-body);
+  }
+  dialog#settings-dialog::backdrop { background: rgba(27, 42, 74, 0.45); }
+  .dialog-inner { padding: 24px; }
+  .dialog-inner h2 {
+    font-family: var(--font-display);
+    margin-top: 0;
+    font-size: 1.3rem;
+    border-bottom: 2px solid var(--brass-dim);
+    padding-bottom: 10px;
+  }
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    margin-bottom: 5px;
+  }
+  .field input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+  }
+  .field .help {
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    margin-top: 5px;
+    line-height: 1.4;
+  }
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .dialog-actions button {
+    font-family: var(--font-body);
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    border: 1px solid var(--line);
+    background: var(--paper);
+  }
+  .dialog-actions button.primary { background: var(--ink); color: var(--paper-card); border-color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="masthead">
+    <h1>Milon<span class="heb">מילון</span></h1>
+    <button class="gear" id="open-settings" title="Settings" aria-label="Settings">⚙</button>
+  </header>
+
+  <form class="search-row" id="search-form">
+    <input type="text" id="search-input" placeholder="Type a Hebrew or English word…" autocomplete="off" autofocus />
+    <button class="go" type="submit" id="go-button">Search</button>
+  </form>
+  <label class="gloss-toggle">
+    <input type="checkbox" id="show-gloss" />
+    Show secondary translations
+  </label>
+  <div class="status-line" id="status-line"></div>
+
+  <main id="results">
+    <div class="empty-state">Search a word to see its entry.</div>
+  </main>
+</div>
+
+<dialog id="settings-dialog">
+  <div class="dialog-inner">
+    <h2>Settings</h2>
+    <div class="field">
+      <label for="firebase-key">Firebase Web API Key</label>
+      <input type="text" id="firebase-key" />
+      <div class="help">Used only to obtain an anonymous auth token, the same way Morfix's own frontend does. Not a secret — this key just identifies the Firebase project.</div>
+    </div>
+    <div class="field">
+      <div class="help">
+        Search tries a direct request first, then falls back through a chain of public CORS proxies
+        (allorigins, codetabs, corsproxy.io). Only <code>Authorization</code> can be forwarded this way —
+        browsers never allow JS to set <code>Referer</code>/<code>Origin</code> on any fetch, through any proxy.
+        If Morfix's backend also enforces those, every attempt will fail with a 403 and you'll need a proxy you
+        control that hardcodes those headers server-side.
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" id="settings-cancel">Cancel</button>
+      <button type="button" id="settings-save" class="primary">Save</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- PWA manifest (inline, no separate file needed) ----------
+  const manifest = {
+    name: "Milon — Morfix Search",
+    short_name: "Milon",
+    start_url: ".",
+    display: "standalone",
+    background_color: "#EFE6D8",
+    theme_color: "#1B2A4A",
+    icons: []
+  };
+  const manifestBlob = new Blob([JSON.stringify(manifest)], { type: "application/json" });
+  document.getElementById("manifest-link").href = URL.createObjectURL(manifestBlob);
+
+  // Best-effort service worker for offline shell caching. Silently no-ops
+  // under file:// or unsupported environments.
+  if ("serviceWorker" in navigator) {
+    try {
+      const swSource = `
+        self.addEventListener('install', e => self.skipWaiting());
+        self.addEventListener('activate', e => self.clients.claim());
+        self.addEventListener('fetch', e => {});
+      `;
+      const swBlob = new Blob([swSource], { type: "application/javascript" });
+      navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(() => {});
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---------- State ----------
+  const state = {
+    firebaseKey: "AIzaSyB7Uf_gXgLY2TOKdKPfHn9xoAaZK1NKywU",
+    token: null,
+    tokenExpiresAt: 0,
+    showGloss: false,
+    lastResult: null
+  };
+
+  // ---------- Elements ----------
+  const els = {
+    form: document.getElementById("search-form"),
+    input: document.getElementById("search-input"),
+    goButton: document.getElementById("go-button"),
+    showGlossCheckbox: document.getElementById("show-gloss"),
+    status: document.getElementById("status-line"),
+    results: document.getElementById("results"),
+    openSettings: document.getElementById("open-settings"),
+    dialog: document.getElementById("settings-dialog"),
+    firebaseKeyField: document.getElementById("firebase-key"),
+    settingsSave: document.getElementById("settings-save"),
+    settingsCancel: document.getElementById("settings-cancel")
+  };
+
+  els.firebaseKeyField.value = state.firebaseKey;
+
+  els.openSettings.addEventListener("click", () => {
+    els.firebaseKeyField.value = state.firebaseKey;
+    els.dialog.showModal();
+  });
+  els.settingsCancel.addEventListener("click", () => els.dialog.close());
+  els.settingsSave.addEventListener("click", () => {
+    state.firebaseKey = els.firebaseKeyField.value.trim();
+    state.token = null; // force re-auth if key changed
+    els.dialog.close();
+  });
+
+  // ---------- Auth ----------
+  async function getToken() {
+    const now = Date.now();
+    if (state.token && now < state.tokenExpiresAt) return state.token;
+
+    const resp = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(state.firebaseKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ returnSecureToken: true })
+      }
+    );
+    if (!resp.ok) {
+      throw new Error(`Firebase auth failed (${resp.status}). Check the Firebase API key in Settings.`);
+    }
+    const data = await resp.json();
+    state.token = data.idToken;
+    // expiresIn is seconds as a string; refresh a little early
+    const expiresInMs = (parseInt(data.expiresIn, 10) || 3600) * 1000;
+    state.tokenExpiresAt = now + expiresInMs - 60000;
+    return state.token;
+  }
+
+  // ---------- Timeout helper ----------
+  function fetchWithTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+  }
+
+  // Try a direct fetch, then a chain of public CORS proxies (each capped with
+  // its own timeout so one slow/dead proxy doesn't stall the whole search).
+  //
+  // IMPORTANT CAVEAT specific to Morfix: `Referer` and `Origin` are on the
+  // browser's forbidden-header list — JS can never set them on a fetch(),
+  // through any proxy, no matter what that proxy otherwise supports. So none
+  // of these attempts can spoof Referer/Origin the way Morfix's own frontend
+  // does; only `Authorization` can actually be sent. If Morfix's backend
+  // requires a matching Referer/Origin *in addition to* the bearer token,
+  // every attempt below will 403 regardless of proxy, and the only fix is a
+  // proxy you control that hardcodes those headers server-side.
+  async function fetchWithCorsFallback(url, authHeaders) {
+    // corsproxy.io goes first: it's the only proxy here that can actually
+    // forward the Authorization header Morfix requires, so it's the one
+    // that reliably succeeds. The others are kept as fallbacks in case
+    // corsproxy.io is rate-limited/down, or if Morfix ever stops requiring
+    // auth (unlikely, but cheap insurance).
+    const attempts = [
+      { name: 'corsproxy.io', fetch: () => fetchWithTimeout(`https://corsproxy.io/?url=${encodeURIComponent(url)}`, { headers: authHeaders }, 9000) },
+      { name: 'direct',       fetch: () => fetchWithTimeout(url, { headers: authHeaders }, 8000) },
+      { name: 'allorigins',   fetch: () => fetchWithTimeout(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {}, 9000) },
+      { name: 'codetabs',     fetch: () => fetchWithTimeout(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, {}, 9000) },
+    ];
+
+    const errors = [];
+    for (const attempt of attempts) {
+      try {
+        const resp = await attempt.fetch();
+        if (!resp.ok) {
+          errors.push(`${attempt.name}: HTTP ${resp.status}`);
+          continue;
+        }
+        // Simple passthrough proxies (allorigins, codetabs) return their own
+        // 200 OK even when the upstream body is Morfix's own error payload
+        // (e.g. {"message":"Forbidden"}) — usually because they don't forward
+        // the Authorization header at all. So a 200 here doesn't mean success;
+        // check the shape of the body itself before trusting it.
+        let data;
+        try {
+          data = await resp.json();
+        } catch (parseErr) {
+          errors.push(`${attempt.name}: response wasn't valid JSON`);
+          continue;
+        }
+        const looksLikeMorfix = data && ("ResultType" in data || "TranslationType" in data);
+        if (!looksLikeMorfix) {
+          errors.push(`${attempt.name}: got "${data && data.message ? data.message : JSON.stringify(data).slice(0, 60)}" — not a Morfix payload, likely missing auth`);
+          continue;
+        }
+        return { data, via: attempt.name };
+      } catch (err) {
+        errors.push(`${attempt.name}: ${err.name === 'AbortError' ? 'timed out' : err.message}`);
+      }
+    }
+    throw new Error(`All fetch attempts failed — ${errors.join('; ')}`);
+  }
+
+  // ---------- Morfix fetch ----------
+  async function fetchMorfix(word, { retriedAuth = false } = {}) {
+    const token = await getToken();
+    const targetUrl =
+      "https://backend.morfix.com/TranslationHebrew/TranslationService.svc/GetTranslation/" +
+      encodeURIComponent(word);
+
+    // allorigins/codetabs are simple GET-only passthroughs that don't forward
+    // custom request headers at all, so Authorization only has a chance of
+    // reaching Morfix via the 'direct' or 'corsproxy.io' attempts.
+    const authHeaders = { "Authorization": `Bearer ${token}`, "Accept": "application/json" };
+
+    let data, via;
+    try {
+      ({ data, via } = await fetchWithCorsFallback(targetUrl, authHeaders));
+    } catch (err) {
+      if (!retriedAuth) {
+        // The token may simply be stale; try once more with a fresh one
+        // before giving up and surfacing the full error chain.
+        state.token = null;
+        return fetchMorfix(word, { retriedAuth: true });
+      }
+      throw new Error(`Could not reach Morfix through any route. ${err.message}`);
+    }
+
+    els.status.dataset.via = via; // surfaced in the UI so you can see which route worked
+    return data;
+  }
+
+  // ---------- Parsing (mirrors the agreed Entry/SearchResult schema) ----------
+  function flattenMeanings(meaningGroups) {
+    const result = [];
+    for (const group of meaningGroups || []) {
+      // Morfix nests near-synonyms together within one group (e.g. "Hello!"
+      // and "Goodbye" both under the שלום sense, or "peacefully" and "at
+      // peace" both under בשלום) — they belong on one line, not split into
+      // separate senses.
+      const displayText = group.map(item => item.DisplayText).filter(Boolean).join(", ");
+      const definition = group.map(item => item.Meaning).filter(Boolean).join("; ");
+      const gloss = group.map(item => item.Translation).filter(Boolean).join("; ");
+      if (displayText || definition) {
+        result.push({ displayText, definition, gloss });
+      }
+    }
+    return result;
+  }
+
+  function parseMorfixResponse(data) {
+    const isToEnglish = data.TranslationType === "ToEnglish"; // query was Hebrew
+    const headwordLanguage = isToEnglish ? "hebrew" : "english";
+    const matched = data.ResultType === "Match";
+
+    const entries = (data.Words || []).map(word => ({
+      id: word.ID || "",
+      headwordLanguage,
+      partOfSpeech: word.PartOfSpeech || "",
+      senses: flattenMeanings(word.InputLanguageMeanings),
+      translations: flattenMeanings(word.OutputLanguageMeanings)
+    }));
+
+    const corrections = (data.CorrectionList || [])
+      .map(item => item.Word)
+      .filter(Boolean);
+
+    return { query: data.Query || "", matched, entries, corrections };
+  }
+
+  // ---------- Rendering ----------
+  function senseListHtml(senses, dir) {
+    if (!senses.length) return "";
+    return `<ul class="sense-list" dir="${dir}">${senses.map(s => `
+      <li>
+        <span class="sense-display">${escapeHtml(s.displayText)}</span>
+        ${state.showGloss && s.gloss ? `<span class="sense-gloss">— ${escapeHtml(s.gloss)}</span>` : ""}
+        ${s.definition ? `<span class="sense-def">${escapeHtml(s.definition)}</span>` : ""}
+      </li>`).join("")}</ul>`;
+  }
+
+  function entryCardHtml(entry) {
+    const tabLabel = entry.headwordLanguage === "hebrew" ? "HEB → ENG" : "ENG → HEB";
+    const headword = entry.senses[0] ? entry.senses[0].displayText : "";
+    // Direction is fixed per section by which language it actually holds,
+    // not sniffed from content — an idiom like "בשלום - safely" living in
+    // the English translations list should still read left-to-right overall.
+    const sourceDir = entry.headwordLanguage === "hebrew" ? "rtl" : "ltr";
+    const translationDir = entry.headwordLanguage === "hebrew" ? "ltr" : "rtl";
+    return `
+      <div class="entry-card">
+        <div class="entry-tab">${tabLabel}</div>
+        <div class="entry-body">
+          <div class="headword-row" dir="${sourceDir}">
+            <span class="headword">${escapeHtml(headword)}</span>
+            ${entry.partOfSpeech ? `<span class="pos-tag">${escapeHtml(entry.partOfSpeech)}</span>` : ""}
+          </div>
+          ${entry.translations.length ? `<div class="section-label">Translations</div>${senseListHtml(entry.translations, translationDir)}` : ""}
+          ${entry.senses.length > 1 || (entry.senses[0] && entry.senses[0].definition) ? `<div class="section-label">Source</div>${senseListHtml(entry.senses, sourceDir)}` : ""}
+        </div>
+      </div>`;
+  }
+
+  function suggestionsHtml(result) {
+    return `
+      <div class="suggestions-box">
+        <div class="section-label">No exact match for "${escapeHtml(result.query)}" — did you mean</div>
+        <div class="chip-row">
+          ${result.corrections.map(w => `<button type="button" class="chip" data-word="${escapeHtml(w)}">${escapeHtml(w)}</button>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+  }
+
+  function render(result) {
+    if (result.matched && result.entries.length) {
+      els.results.innerHTML = result.entries.map(entryCardHtml).join("");
+    } else if (result.corrections.length) {
+      els.results.innerHTML = suggestionsHtml(result);
+      els.results.querySelectorAll(".chip").forEach(chip => {
+        chip.addEventListener("click", () => {
+          els.input.value = chip.dataset.word;
+          doSearch(chip.dataset.word);
+        });
+      });
+    } else {
+      els.results.innerHTML = `<div class="empty-state">No results for "${escapeHtml(result.query)}".</div>`;
+    }
+  }
+
+  // ---------- Search flow ----------
+  async function doSearch(word) {
+    word = word.trim();
+    if (!word) return;
+    els.goButton.disabled = true;
+    els.status.textContent = "Searching…";
+    els.status.classList.remove("error");
+    try {
+      const data = await fetchMorfix(word);
+      const result = parseMorfixResponse(data);
+      state.lastResult = result;
+      render(result);
+      els.status.textContent = els.status.dataset.via ? `via ${els.status.dataset.via}` : "";
+    } catch (err) {
+      els.status.textContent = err.message;
+      els.status.classList.add("error");
+    } finally {
+      els.goButton.disabled = false;
+    }
+  }
+
+  els.form.addEventListener("submit", e => {
+    e.preventDefault();
+    doSearch(els.input.value);
+  });
+
+  els.showGlossCheckbox.addEventListener("change", () => {
+    state.showGloss = els.showGlossCheckbox.checked;
+    if (state.lastResult) render(state.lastResult);
+  });
+})();
+</script>
+</body>
+</html>
