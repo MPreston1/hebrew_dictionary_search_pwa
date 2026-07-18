@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Milon — Morfix &amp; Pealim</title>
+<title>Hebrew Dictionary Search</title>
 <meta name="theme-color" content="#1B2A4A" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Milon" />
+<meta name="apple-mobile-web-app-title" content="Hebrew Dict" />
 <link id="manifest-link" rel="manifest" />
 
 <style>
@@ -117,24 +117,26 @@
   .dict-toggle-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 16px;
+    flex-wrap: wrap;
     margin-bottom: 6px;
   }
-  .dict-toggle-row label {
+  .dict-toggle-label {
     font-family: var(--font-body);
     font-size: 0.85rem;
     color: var(--ink-soft);
   }
-  .dict-toggle-row select {
+  .dict-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-family: var(--font-body);
     font-size: 0.9rem;
-    padding: 5px 10px;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    background: var(--paper-card);
     color: var(--ink);
     cursor: pointer;
+    user-select: none;
   }
+  .dict-checkbox input { cursor: pointer; }
 
   .gloss-toggle {
     display: flex;
@@ -179,14 +181,18 @@
 
   .dict-columns {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 26px;
     align-items: start;
+  }
+  @media (max-width: 980px) {
+    .dict-columns { grid-template-columns: 1fr 1fr; }
   }
   @media (max-width: 760px) {
     .dict-columns { grid-template-columns: 1fr; }
   }
-  .dict-columns.single-column { grid-template-columns: 1fr; max-width: 640px; }
+  .dict-columns.cols-1 { grid-template-columns: 1fr; max-width: 640px; }
+  .dict-columns.cols-2 { grid-template-columns: 1fr 1fr; }
   .dict-column { min-width: 0; }
   .dict-column-header {
     font-family: var(--font-display);
@@ -567,6 +573,135 @@
     color: var(--brass);
   }
 
+  /* ---------- Milog-specific ---------- */
+  /* NOTE: milog.co.il's HTML structure was never directly inspected (only
+     markdown-rendered previews were available while building this), so the
+     parser in parseMilogSearchHtml/parseMilogEntryHtml below is a best-effort,
+     pattern-based sketch — not verified against real class/id names the way
+     Morfix and Pealim's parsers are. Use "View raw response" on the Milog
+     column to see what's actually coming back and adjust selectors as needed. */
+  .milog-root {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  .milog-idiom-block {
+    background: var(--paper-card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px 22px;
+    margin-bottom: 20px;
+  }
+  ul.milog-idiom-list { list-style: none; margin: 0; padding: 0; }
+  ul.milog-idiom-list li {
+    padding: 7px 0;
+    border-top: 1px solid var(--line);
+    cursor: pointer;
+  }
+  ul.milog-idiom-list li:first-child { border-top: none; }
+  ul.milog-idiom-list li:hover .milog-phrase-head { color: var(--brass); }
+  .milog-phrase-head { font-family: var(--font-display); font-size: 1.05rem; }
+  .milog-phrase-def { color: var(--ink-soft); font-size: 0.88rem; display: block; margin-top: 2px; }
+
+  .milog-expandable { cursor: pointer; user-select: none; }
+  .milog-expand-hint {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .milog-expand-chevron {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--brass);
+    transition: transform 0.15s ease;
+    margin-inline-start: auto;
+  }
+  .milog-expand-chevron.open { transform: rotate(180deg); }
+  .milog-expand-panel {
+    display: none;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--brass-dim);
+  }
+  .milog-expand-panel.open { display: block; }
+  .milog-expand-loading, .milog-expand-error {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+  }
+  .milog-expand-error { color: var(--error); }
+  .milog-subsection { margin-bottom: 16px; }
+  .milog-subsection:last-child { margin-bottom: 0; }
+
+  .milog-synonym-row { font-size: 0.9rem; padding: 4px 0; }
+  .milog-synonym-sense-num { font-family: var(--font-mono); color: var(--brass); font-size: 0.72rem; margin-inline-end: 4px; }
+  .milog-antonym-row {
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+    padding: 2px 0 2px 14px;
+    border-inline-start: 2px solid var(--error);
+    margin-top: 3px;
+  }
+  .milog-antonym-label { color: var(--error); font-family: var(--font-mono); font-size: 0.68rem; }
+
+  .milog-full-phrase-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .milog-full-phrase-grid .chip { font-size: 0.85rem; }
+  .milog-chip-multi {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    font-family: var(--font-body);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 6px 12px;
+    cursor: pointer;
+    max-width: 260px;
+  }
+  .milog-chip-multi:hover { border-color: var(--brass); }
+  .milog-chip-multi:hover .milog-chip-multi-head { color: var(--brass); }
+  .milog-chip-multi-head { font-family: var(--font-display); font-size: 0.9rem; }
+  .milog-chip-multi-sense {
+    display: flex;
+    gap: 5px;
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    padding: 2px 0;
+  }
+  .milog-chip-multi-sense-num { font-family: var(--font-mono); color: var(--brass); flex-shrink: 0; }
+
+  .milog-conj-group { margin-bottom: 14px; }
+  .milog-conj-tense-label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--brass);
+    margin-bottom: 4px;
+  }
+  .milog-conj-forms-row { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+  .milog-conj-form { font-family: var(--font-display); font-size: 0.92rem; }
+  .milog-conj-form .milog-person-tag {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--ink-soft);
+    display: block;
+  }
+  .milog-show-all-btn {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--brass);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 4px 0;
+  }
+
   .hover-tooltip {
     position: fixed;
     background: var(--ink);
@@ -587,7 +722,7 @@
 <body>
 <div class="shell">
   <header class="masthead">
-    <h1>Milon<span class="heb">מילון</span></h1>
+    <h1>Hebrew Dictionary Search</h1>
     <button class="gear" id="open-settings" title="Settings" aria-label="Settings">⚙</button>
   </header>
 
@@ -597,12 +732,10 @@
   </form>
 
   <div class="dict-toggle-row">
-    <label for="dict-scope">Search:</label>
-    <select id="dict-scope">
-      <option value="both" selected>Both</option>
-      <option value="morfix">Morfix only</option>
-      <option value="pealim">Pealim only</option>
-    </select>
+    <span class="dict-toggle-label">Search:</span>
+    <label class="dict-checkbox"><input type="checkbox" id="scope-morfix" checked> Morfix</label>
+    <label class="dict-checkbox"><input type="checkbox" id="scope-pealim" checked> Pealim</label>
+    <label class="dict-checkbox"><input type="checkbox" id="scope-milog" checked> Milog</label>
   </div>
   <label class="gloss-toggle">
     <input type="checkbox" id="show-gloss" />
@@ -631,6 +764,17 @@
         <div class="empty-state">Search a word to see its entry.</div>
       </div>
     </div>
+
+    <div class="dict-column" id="column-milog">
+      <div class="dict-column-header">Milog<span class="heb">מילוג</span></div>
+      <div class="status-row">
+        <div class="status-line" id="status-milog"></div>
+        <button type="button" class="link-button" id="view-raw-milog" hidden>View raw response</button>
+      </div>
+      <div class="dict-results" id="results-milog">
+        <div class="empty-state">Search a word to see its entry.</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -645,6 +789,13 @@
       <div class="help">Used only to obtain an anonymous auth token, the same way Morfix's own frontend does. Not a secret — this key just identifies the Firebase project. Pealim needs no key at all — it's a plain page fetch.</div>
     </div>
     <div class="field">
+      <label>
+        <input type="checkbox" id="pref-offline-search" style="width:auto; margin-right:6px; vertical-align:middle;">
+        Search Pealim from the offline backup instead of the live site
+      </label>
+      <div class="help">When checked, Pealim searches always use the local backup below — no live request is made, and results won't include anything crawled since your last backup.</div>
+    </div>
+    <div class="field">
       <label>Offline backup (Pealim)</label>
       <div class="backup-status-line" id="backup-status">Checking cache…</div>
       <div class="backup-progress-bar"><div id="backup-progress-fill"></div></div>
@@ -653,13 +804,20 @@
         <button type="button" id="backup-pause" disabled>Pause</button>
         <button type="button" id="backup-clear">Clear offline cache</button>
       </div>
+      <div class="backup-buttons" style="margin-top:8px;">
+        <button type="button" id="backup-export">Download backup as JSON</button>
+        <button type="button" id="backup-import">Import backup from JSON…</button>
+        <input type="file" id="backup-import-file" accept="application/json,.json" hidden>
+      </div>
       <div class="help">
         Crawls pealim.com's full "All words" listing (~9,000 entries) plus full conjugation
         tables for every verb, and stores it all in this browser's IndexedDB so Pealim
         searches work offline. Takes a while the first time (many small requests through
         the same CORS proxy chain above) — safe to pause and resume anytime, including after
-        closing the app. Search falls back to this cache automatically when you're offline
-        or when the live proxies fail.
+        closing the app. Use the checkbox above to actually search it; use "Download backup
+        as JSON" to save a copy (e.g. to move it to another browser or device), and "Import
+        backup from JSON" to load a previously downloaded copy instead of re-crawling from
+        scratch — importing merges into whatever's already cached here.
       </div>
     </div>
     <div class="field">
@@ -693,8 +851,8 @@
 
   // ---------- PWA manifest (inline, no separate file needed) ----------
   const manifest = {
-    name: "Milon — Morfix & Pealim",
-    short_name: "Milon",
+    name: "Hebrew Dictionary Search",
+    short_name: "Hebrew Dict",
     start_url: ".",
     display: "standalone",
     background_color: "#EFE6D8",
@@ -722,10 +880,12 @@
     token: null,
     tokenExpiresAt: 0,
     showGloss: false,
-    scope: "both",
+    enabled: { morfix: true, pealim: true, milog: true },
     morfix: { lastResult: null, lastRaw: null },
     pealim: { lastResult: null, lastRawHtml: null },
-    backup: { running: false, abortRequested: false }
+    milog: { lastResult: null, lastRawHtml: null },
+    backup: { running: false, abortRequested: false },
+    preferOfflineSearch: (() => { try { return localStorage.getItem("milon-pealim-prefer-offline") === "1"; } catch (e) { return false; } })()
   };
 
   // ---------- Elements ----------
@@ -733,17 +893,23 @@
     form: document.getElementById("search-form"),
     input: document.getElementById("search-input"),
     goButton: document.getElementById("go-button"),
-    searchScopeSelect: document.getElementById("dict-scope"),
+    scopeMorfixCheckbox: document.getElementById("scope-morfix"),
+    scopePealimCheckbox: document.getElementById("scope-pealim"),
+    scopeMilogCheckbox: document.getElementById("scope-milog"),
     columnMorfix: document.getElementById("column-morfix"),
     columnPealim: document.getElementById("column-pealim"),
+    columnMilog: document.getElementById("column-milog"),
     dictColumns: document.querySelector(".dict-columns"),
     showGlossCheckbox: document.getElementById("show-gloss"),
     statusMorfix: document.getElementById("status-morfix"),
     statusPealim: document.getElementById("status-pealim"),
+    statusMilog: document.getElementById("status-milog"),
     viewRawMorfix: document.getElementById("view-raw-morfix"),
     viewRawPealim: document.getElementById("view-raw-pealim"),
+    viewRawMilog: document.getElementById("view-raw-milog"),
     resultsMorfix: document.getElementById("results-morfix"),
     resultsPealim: document.getElementById("results-pealim"),
+    resultsMilog: document.getElementById("results-milog"),
     openSettings: document.getElementById("open-settings"),
     dialog: document.getElementById("settings-dialog"),
     firebaseKeyField: document.getElementById("firebase-key"),
@@ -758,7 +924,11 @@
     backupProgressFill: document.getElementById("backup-progress-fill"),
     backupStart: document.getElementById("backup-start"),
     backupPause: document.getElementById("backup-pause"),
-    backupClear: document.getElementById("backup-clear")
+    backupClear: document.getElementById("backup-clear"),
+    prefOfflineSearch: document.getElementById("pref-offline-search"),
+    backupExport: document.getElementById("backup-export"),
+    backupImport: document.getElementById("backup-import"),
+    backupImportFile: document.getElementById("backup-import-file")
   };
 
   els.firebaseKeyField.value = state.firebaseKey;
@@ -792,6 +962,48 @@
       els.backupClear.disabled = false;
     }
   });
+
+  els.prefOfflineSearch.checked = state.preferOfflineSearch;
+  els.prefOfflineSearch.addEventListener("change", () => {
+    state.preferOfflineSearch = els.prefOfflineSearch.checked;
+    try { localStorage.setItem("milon-pealim-prefer-offline", state.preferOfflineSearch ? "1" : "0"); } catch (e) { /* ignore */ }
+  });
+
+  els.backupExport.addEventListener("click", async () => {
+    els.backupExport.disabled = true;
+    const originalLabel = els.backupExport.textContent;
+    els.backupExport.textContent = "Preparing…";
+    try {
+      await exportOfflineBackup();
+    } catch (e) {
+      alert(`Couldn't export backup: ${e.message}`);
+    } finally {
+      els.backupExport.disabled = false;
+      els.backupExport.textContent = originalLabel;
+    }
+  });
+
+  els.backupImport.addEventListener("click", () => els.backupImportFile.click());
+  els.backupImportFile.addEventListener("change", async () => {
+    const file = els.backupImportFile.files && els.backupImportFile.files[0];
+    els.backupImportFile.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    els.backupImport.disabled = true;
+    const originalLabel = els.backupImport.textContent;
+    els.backupImport.textContent = "Importing…";
+    try {
+      const text = await file.text();
+      const summary = await importOfflineBackup(text);
+      await refreshBackupStatusIdle();
+      alert(`Imported ${summary.listing} listing entries and ${summary.verbs} verb tables.`);
+    } catch (e) {
+      alert(`Couldn't import backup: ${e.message}`);
+    } finally {
+      els.backupImport.disabled = false;
+      els.backupImport.textContent = originalLabel;
+    }
+  });
+
   refreshBackupStatusIdle();
 
   function resetMorfixColumn() {
@@ -812,20 +1024,39 @@
     els.resultsPealim.innerHTML = `<div class="empty-state">Search a word to see its entry.</div>`;
   }
 
-  function applyScope() {
-    const showMorfix = state.scope !== "pealim";
-    const showPealim = state.scope !== "morfix";
-    els.columnMorfix.hidden = !showMorfix;
-    els.columnPealim.hidden = !showPealim;
-    els.dictColumns.classList.toggle("single-column", !(showMorfix && showPealim));
-    if (!showMorfix) resetMorfixColumn();
-    if (!showPealim) resetPealimColumn();
+  function resetMilogColumn() {
+    state.milog.lastResult = null;
+    state.milog.lastRawHtml = null;
+    els.statusMilog.textContent = "";
+    els.statusMilog.classList.remove("error");
+    els.viewRawMilog.hidden = true;
+    els.resultsMilog.innerHTML = `<div class="empty-state">Search a word to see its entry.</div>`;
   }
 
-  els.searchScopeSelect.addEventListener("change", () => {
-    state.scope = els.searchScopeSelect.value;
+  function applyScope() {
+    const showMorfix = state.enabled.morfix;
+    const showPealim = state.enabled.pealim;
+    const showMilog = state.enabled.milog;
+    els.columnMorfix.hidden = !showMorfix;
+    els.columnPealim.hidden = !showPealim;
+    els.columnMilog.hidden = !showMilog;
+    const visibleCount = [showMorfix, showPealim, showMilog].filter(Boolean).length;
+    els.dictColumns.classList.toggle("cols-1", visibleCount === 1);
+    els.dictColumns.classList.toggle("cols-2", visibleCount === 2);
+    if (!showMorfix) resetMorfixColumn();
+    if (!showPealim) resetPealimColumn();
+    if (!showMilog) resetMilogColumn();
+  }
+
+  function onScopeCheckboxChange() {
+    state.enabled.morfix = els.scopeMorfixCheckbox.checked;
+    state.enabled.pealim = els.scopePealimCheckbox.checked;
+    state.enabled.milog = els.scopeMilogCheckbox.checked;
     applyScope();
-  });
+  }
+  els.scopeMorfixCheckbox.addEventListener("change", onScopeCheckboxChange);
+  els.scopePealimCheckbox.addEventListener("change", onScopeCheckboxChange);
+  els.scopeMilogCheckbox.addEventListener("change", onScopeCheckboxChange);
   applyScope();
 
   els.showGlossCheckbox.addEventListener("change", () => {
@@ -842,6 +1073,11 @@
   els.viewRawPealim.addEventListener("click", () => {
     els.rawDialogTitle.textContent = "Raw Pealim response (HTML)";
     els.rawJson.textContent = state.pealim.lastRawHtml || "(nothing to show)";
+    els.rawDialog.showModal();
+  });
+  els.viewRawMilog.addEventListener("click", () => {
+    els.rawDialogTitle.textContent = "Raw Milog response (HTML)";
+    els.rawJson.textContent = state.milog.lastRawHtml || "(nothing to show)";
     els.rawDialog.showModal();
   });
 
@@ -1138,6 +1374,46 @@
     tx.objectStore("verbs").clear();
     tx.objectStore("meta").clear();
     await idbTxDone(tx);
+  }
+
+  // Exports everything currently cached (listing + verb tables + progress
+  // meta) as a single downloadable JSON file, so it can be moved to
+  // another browser/device without re-crawling pealim.com from scratch.
+  async function exportOfflineBackup() {
+    const [listing, verbs, meta] = await Promise.all([
+      idbGetAll("listing"), idbGetAll("verbs"), idbGetAll("meta")
+    ]);
+    if (!listing.length) throw new Error("Nothing cached yet — run a backup first.");
+    const payload = { format: "milon-pealim-offline-backup", version: 1, exportedAt: new Date().toISOString(), listing, verbs, meta };
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pealim-offline-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // Imports a JSON file previously produced by exportOfflineBackup(). This
+  // merges into whatever's already cached (idbPutAll uses put(), which
+  // overwrites matching keys and adds new ones) rather than replacing it —
+  // use "Clear offline cache" first if you want a clean replace instead.
+  async function importOfflineBackup(jsonText) {
+    let payload;
+    try {
+      payload = JSON.parse(jsonText);
+    } catch (e) {
+      throw new Error("That file isn't valid JSON.");
+    }
+    if (!payload || !Array.isArray(payload.listing)) {
+      throw new Error("That file doesn't look like a Pealim offline backup export.");
+    }
+    if (payload.listing.length) await idbPutAll("listing", payload.listing);
+    if (Array.isArray(payload.verbs) && payload.verbs.length) await idbPutAll("verbs", payload.verbs);
+    if (Array.isArray(payload.meta) && payload.meta.length) await idbPutAll("meta", payload.meta);
+    return { listing: payload.listing.length, verbs: Array.isArray(payload.verbs) ? payload.verbs.length : 0 };
   }
 
   async function metaGet(key, fallback) {
@@ -1848,21 +2124,21 @@
     els.statusPealim.textContent = "Searching…";
     els.statusPealim.classList.remove("error");
 
-    if (!navigator.onLine) {
+    if (state.preferOfflineSearch) {
       try {
         const cached = await searchOfflineCache(word);
         if (cached) {
           state.pealim.lastResult = cached;
           renderPealim(cached);
-          els.statusPealim.textContent = "via offline cache (no connection)";
+          els.statusPealim.textContent = "via offline backup";
           return;
         }
-        els.statusPealim.textContent = "Offline, and no matching entry in the offline cache.";
+        els.statusPealim.textContent = "No matching entry in the offline backup.";
         els.statusPealim.classList.add("error");
         renderPealim({ entries: [] });
         return;
       } catch (err) {
-        els.statusPealim.textContent = `Offline, and couldn't read the offline cache: ${err.message}`;
+        els.statusPealim.textContent = `Couldn't read the offline backup: ${err.message}`;
         els.statusPealim.classList.add("error");
         return;
       }
@@ -1878,19 +2154,271 @@
       renderPealim(result);
       els.statusPealim.textContent = `via ${via}`;
     } catch (err) {
-      // Live proxies all failed — see if the offline cache has anything
-      // before surfacing the error.
-      try {
-        const cached = await searchOfflineCache(word);
-        if (cached) {
-          state.pealim.lastResult = cached;
-          renderPealim(cached);
-          els.statusPealim.textContent = "via offline cache (live search failed)";
-          return;
-        }
-      } catch (e2) { /* fall through to the original error below */ }
       els.statusPealim.textContent = err.message;
       els.statusPealim.classList.add("error");
+    }
+  }
+
+  // ---------- Milog ----------
+  // Best-effort parser: milog.co.il's real class/id names were never directly
+  // observed (see CSS note above), so this leans on structural patterns that
+  // should be fairly stable regardless of exact markup: entry links whose
+  // href ends in "/e_<digits>", and a Hebrew part-of-speech suffix
+  // (e.g. "- שם עצם, זכר") that milog appends after word-sense headwords but
+  // not after idiom/phrase headwords. Verify against "View raw response" and
+  // adjust the regexes below if milog's actual markup diverges.
+
+  const MILOG_POS_PATTERN = /^\s*[-–]\s*(שם עצם|שם פרטי|שם תואר|תואר|תואר הפועל|פועל|מילת|כינוי|ראשי תיבות|צירוף)/;
+
+  async function fetchMilogPage(url) {
+    const { data, via } = await fetchWithCorsFallback(url, {
+      headers: {},
+      parseAndValidate: async resp => {
+        const text = await resp.text();
+        return /מילוג|milog/i.test(text) ? text : null;
+      }
+    });
+    return { html: data, via };
+  }
+
+  // Walks the parsed document collecting every anchor that looks like an
+  // entry link (points at /<slug>/e_<id>). For each one, checks the text
+  // immediately following it for milog's POS suffix to decide whether it's
+  // a headword sense (noun/verb/etc.) or an idiom/expression, then grabs
+  // whatever numbered-definition-looking text sits between this anchor and
+  // the next one as that entry's definitions.
+  function parseMilogSearchHtml(html, query) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const bodyText = doc.body ? doc.body.textContent : "";
+    const noResults = /לא התקבלו פירושים/.test(bodyText);
+
+    const anchors = Array.from(doc.querySelectorAll("a[href]")).filter(a => {
+      try {
+        const u = new URL(a.getAttribute("href"), "https://milog.co.il");
+        return /\/e_\d+$/.test(u.pathname) && a.textContent.trim();
+      } catch (e) { return false; }
+    });
+
+    const wordEntries = [];
+    const idioms = [];
+
+    anchors.forEach((a, i) => {
+      let entryUrl = "";
+      try { entryUrl = new URL(a.getAttribute("href"), "https://milog.co.il").href; } catch (e) { /* ignore */ }
+      const headword = a.textContent.trim();
+
+      // Text right after the anchor, up to the next anchor or a hard break,
+      // is where milog puts the POS/root suffix for word senses.
+      let trailingText = "";
+      let node = a.nextSibling;
+      let steps = 0;
+      while (node && steps < 6) {
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "A") break;
+        trailingText += node.textContent || "";
+        node = node.nextSibling;
+        steps++;
+      }
+      trailingText = trailingText.trim();
+      const posMatch = trailingText.match(MILOG_POS_PATTERN);
+
+      // Collect numbered-definition-looking lines between this anchor and
+      // the next entry anchor as a rough definitions list.
+      const nextAnchor = anchors[i + 1];
+      let betweenText = "";
+      if (a.parentElement) {
+        let n = a;
+        let guard = 0;
+        while (n && guard < 400) {
+          n = n.nextSibling || (n.parentElement && n.parentElement !== doc.body ? n.parentElement.nextSibling : null);
+          if (!n || n === nextAnchor) break;
+          if (n.nodeType === Node.ELEMENT_NODE && n.contains && nextAnchor && n.contains(nextAnchor)) break;
+          betweenText += (n.textContent || "") + "\n";
+          guard++;
+        }
+      }
+      const definitions = (betweenText.match(/\d+\s*[-.]\s*[^\n]+/g) || [])
+        .map(s => s.trim())
+        .slice(0, 12);
+
+      if (posMatch) {
+        wordEntries.push({
+          headword,
+          entryUrl,
+          posTag: trailingText.replace(/^\s*[-–]\s*/, ""),
+          definitions,
+          expanded: false,
+          expandData: null
+        });
+      } else {
+        idioms.push({
+          headword,
+          entryUrl,
+          definition: definitions[0] ? definitions[0].replace(/^\d+\s*[-.]\s*/, "") : ""
+        });
+      }
+    });
+
+    return { query, found: !noResults && (wordEntries.length > 0 || idioms.length > 0), wordEntries, idioms };
+  }
+
+  // Parses an individual entry page (milog.co.il/word/e_####), which milog
+  // inlines everything into: definitions again, synonyms, the full idiom
+  // list, and a grammar block. Same caveat as above — best-effort patterns,
+  // not verified selectors.
+  function parseMilogEntryHtml(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const bodyText = doc.body ? doc.body.textContent : "";
+
+    const synonyms = [];
+    const synMatches = bodyText.match(/מילים נרדפות[\s\S]{0,600}?(?=צירופים וביטויים|דקדוק ותחביר|$)/);
+    if (synMatches) {
+      (synMatches[0].match(/\d+\s*[-.]\s*[^\n]+/g) || []).forEach(line => {
+        synonyms.push(line.trim());
+      });
+    }
+
+    const idioms = [];
+    Array.from(doc.querySelectorAll("a[href]")).forEach(a => {
+      try {
+        const u = new URL(a.getAttribute("href"), "https://milog.co.il");
+        if (/\/e_\d+$/.test(u.pathname) && a.textContent.trim()) {
+          idioms.push({ headword: a.textContent.trim(), entryUrl: u.href });
+        }
+      } catch (e) { /* ignore */ }
+    });
+
+    const grammarLines = [];
+    const gramMatch = bodyText.match(/דקדוק ותחביר[\s\S]{0,1500}/);
+    if (gramMatch) {
+      gramMatch[0].split("\n").map(s => s.trim()).filter(Boolean).slice(1, 40).forEach(line => grammarLines.push(line));
+    }
+
+    return { synonyms, idioms, grammarLines };
+  }
+
+  function milogIdiomsGridHtml(idioms) {
+    if (!idioms.length) return "";
+    return `
+      <div class="milog-idiom-block">
+        <div class="section-label">Idioms &amp; expressions &middot; tap to search</div>
+        <ul class="milog-idiom-list">
+          ${idioms.map(idiom => `
+            <li data-word="${escapeHtml(idiom.headword)}">
+              <span class="milog-phrase-head">${escapeHtml(idiom.headword)}</span>
+              ${idiom.definition ? `<span class="milog-phrase-def">${escapeHtml(idiom.definition)}</span>` : ""}
+            </li>`).join("")}
+        </ul>
+      </div>`;
+  }
+
+  function milogExpandPanelHtml() {
+    return `<div class="milog-expand-panel"><div class="milog-expand-loading">Loading…</div></div>`;
+  }
+
+  function milogWordEntryCardHtml(entry, index) {
+    return `
+      <div class="entry-card" data-milog-index="${index}">
+        <div class="entry-tab">MILOG</div>
+        <div class="entry-body">
+          <div class="headword-row milog-expandable" data-expand-index="${index}">
+            <span class="headword">${escapeHtml(entry.headword)}</span>
+            <span class="pos-tag">${escapeHtml(entry.posTag)}</span>
+            <span class="milog-expand-hint">tap for more</span>
+            <span class="milog-expand-chevron">▾</span>
+          </div>
+          ${entry.definitions.length ? `
+          <ol class="sense-list">
+            ${entry.definitions.map(d => `<li><span class="sense-display">${escapeHtml(d.replace(/^\d+\s*[-.]\s*/, ""))}</span></li>`).join("")}
+          </ol>` : `<div class="empty-state" style="padding:20px;">No definitions parsed from this entry — try "View raw response" and adjust the parser.</div>`}
+          ${milogExpandPanelHtml()}
+        </div>
+      </div>`;
+  }
+
+  function renderMilog(result) {
+    if (!result.found) {
+      els.resultsMilog.innerHTML = `<div class="empty-state">No results for "${escapeHtml(result.query)}".</div>`;
+      return;
+    }
+    const cards = result.wordEntries.map((entry, i) => milogWordEntryCardHtml(entry, i)).join("");
+    const idiomsHtml = milogIdiomsGridHtml(result.idioms);
+    els.resultsMilog.innerHTML = cards + idiomsHtml || `<div class="empty-state">No results for "${escapeHtml(result.query)}".</div>`;
+
+    // Idiom rows re-run a fresh search, matching the mockup's tap-to-search behavior.
+    els.resultsMilog.querySelectorAll(".milog-idiom-list li[data-word]").forEach(li => {
+      li.addEventListener("click", () => {
+        els.input.value = li.dataset.word;
+        doSearch(li.dataset.word);
+      });
+    });
+
+    // Click-to-expand: fetches the entry's own page (grammar/synonyms/full
+    // idiom list) on first click, then just toggles open/closed after that.
+    els.resultsMilog.querySelectorAll(".headword-row.milog-expandable").forEach(row => {
+      row.addEventListener("click", async () => {
+        const idx = Number(row.dataset.expandIndex);
+        const entry = result.wordEntries[idx];
+        const card = row.closest(".entry-card");
+        const panel = card.querySelector(".milog-expand-panel");
+        const chevron = row.querySelector(".milog-expand-chevron");
+        const nowOpen = !panel.classList.contains("open");
+        panel.classList.toggle("open", nowOpen);
+        chevron.classList.toggle("open", nowOpen);
+        if (!nowOpen || entry.expandData || !entry.entryUrl) return;
+        panel.innerHTML = `<div class="milog-expand-loading">Loading…</div>`;
+        try {
+          const { html } = await fetchMilogPage(entry.entryUrl);
+          const parsed = parseMilogEntryHtml(html);
+          entry.expandData = parsed;
+          panel.innerHTML = `
+            ${parsed.grammarLines.length ? `
+            <div class="milog-subsection">
+              <div class="section-label">Grammar</div>
+              <div class="milog-conj-forms-row">${parsed.grammarLines.map(l => `<span class="milog-conj-form">${escapeHtml(l)}</span>`).join("")}</div>
+            </div>` : ""}
+            ${parsed.synonyms.length ? `
+            <div class="milog-subsection">
+              <div class="section-label">Synonyms</div>
+              ${parsed.synonyms.map(s => `<div class="milog-synonym-row">${escapeHtml(s)}</div>`).join("")}
+            </div>` : ""}
+            ${parsed.idioms.length ? `
+            <div class="milog-subsection">
+              <div class="section-label">All expressions (${parsed.idioms.length}) &middot; tap to search</div>
+              <div class="milog-full-phrase-grid">
+                ${parsed.idioms.map(idm => `<span class="chip" data-word="${escapeHtml(idm.headword)}">${escapeHtml(idm.headword)}</span>`).join("")}
+              </div>
+            </div>` : ""}
+            ${!parsed.grammarLines.length && !parsed.synonyms.length && !parsed.idioms.length ? `<div class="milog-expand-error">Couldn't parse anything useful from this entry page — try "View raw response" and adjust the parser.</div>` : ""}
+          `;
+          panel.querySelectorAll(".chip[data-word]").forEach(chip => {
+            chip.addEventListener("click", e => {
+              e.stopPropagation();
+              els.input.value = chip.dataset.word;
+              doSearch(chip.dataset.word);
+            });
+          });
+        } catch (err) {
+          panel.innerHTML = `<div class="milog-expand-error">${escapeHtml(err.message)}</div>`;
+        }
+      });
+    });
+  }
+
+  async function doMilogSearch(word) {
+    els.statusMilog.textContent = "Searching…";
+    els.statusMilog.classList.remove("error");
+    try {
+      const url = `https://milog.co.il/${encodeURIComponent(word)}`;
+      const { html, via } = await fetchMilogPage(url);
+      state.milog.lastRawHtml = html;
+      els.viewRawMilog.hidden = false;
+      const result = parseMilogSearchHtml(html, word);
+      state.milog.lastResult = result;
+      renderMilog(result);
+      els.statusMilog.textContent = `via ${via}`;
+    } catch (err) {
+      els.statusMilog.textContent = err.message;
+      els.statusMilog.classList.add("error");
     }
   }
 
@@ -1900,12 +2428,14 @@
     if (!word) {
       resetMorfixColumn();
       resetPealimColumn();
+      resetMilogColumn();
       return;
     }
     els.goButton.disabled = true;
     const tasks = [];
-    if (state.scope !== "pealim") tasks.push(doMorfixSearch(word));
-    if (state.scope !== "morfix") tasks.push(doPealimSearch(word));
+    if (state.enabled.morfix) tasks.push(doMorfixSearch(word));
+    if (state.enabled.pealim) tasks.push(doPealimSearch(word));
+    if (state.enabled.milog) tasks.push(doMilogSearch(word));
     await Promise.allSettled(tasks);
     els.goButton.disabled = false;
   }
