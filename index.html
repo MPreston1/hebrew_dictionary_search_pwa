@@ -2555,6 +2555,13 @@
     }
   }
 
+  // Milog's search only works reliably for Hebrew terms — English queries
+  // reliably error out (not just return no results), so skip the call
+  // entirely rather than let it fail every time.
+  function hasLatinLetters(str) {
+    return /[a-zA-Z]/.test(str);
+  }
+
   // ---------- Search orchestration ----------
   async function doSearch(word) {
     word = word.trim();
@@ -2568,7 +2575,14 @@
     const tasks = [];
     if (state.enabled.morfix) tasks.push(doMorfixSearch(word));
     if (state.enabled.pealim) tasks.push(doPealimSearch(word));
-    if (state.enabled.milog) tasks.push(doMilogSearch(word));
+    if (state.enabled.milog) {
+      if (hasLatinLetters(word)) {
+        resetMilogColumn();
+        els.statusMilog.textContent = "Milog only searches Hebrew terms — skipped for this query.";
+      } else {
+        tasks.push(doMilogSearch(word));
+      }
+    }
     await Promise.allSettled(tasks);
     els.goButton.disabled = false;
   }
