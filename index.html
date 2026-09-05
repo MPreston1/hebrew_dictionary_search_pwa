@@ -1128,7 +1128,14 @@
   // body is an error page, so HTTP status alone isn't trustworthy.
   async function fetchWithCorsFallback(url, { headers = {}, parseAndValidate }) {
     const attempts = [
-      { name: 'corsproxy.io', fetch: () => fetchWithTimeout(`https://corsproxy.io/?key=46e13d75&url=${encodeURIComponent(url)}`, { headers }, 9000) },
+      //{ name: 'corsproxy.io', fetch: () => fetchWithTimeout(`https://corsproxy.io/?key=46e13d75&url=${encodeURIComponent(url)}`, { headers }, 9000) },
+      { name: 'corsproxy.io', fetch: () => {
+        let proxyUrl =
+          `https://corsproxy.io/?key=KEYDATA&url=${encodeURIComponent(url)}`;
+
+        for (const [name, value] of Object.entries(headers)) {
+          proxyUrl += `&reqHeaders=${encodeURIComponent(`${name}:${value}`)}`;
+      },
       { name: 'direct',       fetch: () => fetchWithTimeout(url, { headers }, 8000) },
       { name: 'allorigins',   fetch: () => fetchWithTimeout(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {}, 9000) },
       { name: 'codetabs',     fetch: () => fetchWithTimeout(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, {}, 9000) },
@@ -1163,8 +1170,8 @@
     const targetUrl =
       "https://backend.morfix.com/TranslationHebrew/TranslationService.svc/GetTranslation/" +
       encodeURIComponent(word);
-    //const authHeaders = { "Authorization": `Bearer ${token}`, "Accept": "application/json" };
-    const authHeaders = { "Authorization": `Bearer ${token}` };
+    const authHeaders = { "Authorization": `Bearer ${token}`, "Accept": "application/json" };
+    //const authHeaders = { "Authorization": `Bearer ${token}` };
 
     let data, via;
     try {
