@@ -1135,6 +1135,10 @@
 
         for (const [name, value] of Object.entries(headers)) {
           proxyUrl += `&reqHeaders=${encodeURIComponent(`${name}:${value}`)}`;
+        }
+
+        return fetchWithTimeout(proxyUrl, {}, 9000);
+        }
       },
       { name: 'direct',       fetch: () => fetchWithTimeout(url, { headers }, 8000) },
       { name: 'allorigins',   fetch: () => fetchWithTimeout(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {}, 9000) },
