@@ -1163,7 +1163,8 @@
     const targetUrl =
       "https://backend.morfix.com/TranslationHebrew/TranslationService.svc/GetTranslation/" +
       encodeURIComponent(word);
-    const authHeaders = { "Authorization": `Bearer ${token}`, "Accept": "application/json" };
+    //const authHeaders = { "Authorization": `Bearer ${token}`, "Accept": "application/json" };
+    const authHeaders = { "Authorization": `Bearer ${token}` };
 
     let data, via;
     try {
