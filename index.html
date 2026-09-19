@@ -1311,7 +1311,6 @@
       renderMorfix(result);
       els.statusMorfix.textContent = `via ${via}`;
       await putCachedSearchResult("morfix", word, result);
-      await indexHeadwords("morfix", word, result);
     } catch (err) {
       const fallback = await tryHeadwordFallback("morfix", word);
       if (fallback) {
@@ -1356,15 +1355,28 @@
 
   // ---------- Search results cache (IndexedDB) ----------
   // Caches the parsed results from each of the three live dictionary
-  // lookups (not the raw response — just what's needed to re-render),
-  // keyed by source+word, so re-searching the same word doesn't hit the
-  // network again. A cached entry older than SEARCH_CACHE_STALE_MONTHS is
-  // treated as a miss, erased, and replaced by a fresh live fetch (which
-  // then gets cached again). Also used for Pealim's per-verb conjugation
-  // tables (source "pealim-conj", keyed by the verb's dictUrl).
+  // lookups (not the raw response — just what's needed to re-render), so
+  // re-searching the same word doesn't hit the network again. A cached
+  // entry older than SEARCH_CACHE_STALE_MONTHS is treated as a miss,
+  // erased, and replaced by a fresh live fetch (which then gets cached
+  // again). Also used for Pealim's per-verb conjugation tables (source
+  // "pealim-conj", keyed by the verb's dictUrl).
+  //
+  // For morfix/pealim/milog, a query's result is NOT stored as one big
+  // self-contained blob. It's split into individual dictionary entries
+  // (each stored once, keyed by its own headword, in the "entries" store)
+  // plus a small "results" record per query that just lists which entry
+  // keys it returned, in order, plus whatever top-level fields aren't
+  // per-entry (Morfix's corrections list, Milog's "found" flag, etc). This
+  // is what lets an overlapping search — "שלום" and "שלה" both returning
+  // שָׁלָה — share one copy of that entry instead of storing it twice, and
+  // it's also what powers the partial-match fallback below: since every
+  // entry already lives at its own headword-keyed address, a query with no
+  // cache entry of its own can still look up one specific word directly.
   const SEARCH_CACHE_DB_NAME = "milon-search-cache";
-  const SEARCH_CACHE_DB_VERSION = 2;
+  const SEARCH_CACHE_DB_VERSION = 3;
   const SEARCH_CACHE_STALE_MONTHS = 3;
+  const SEARCH_CACHE_DEDUP_SOURCES = new Set(["morfix", "pealim", "milog"]);
   let searchCacheDbPromise = null;
 
   function openSearchCacheDb() {
@@ -1374,12 +1386,11 @@
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains("results")) db.createObjectStore("results", { keyPath: "key" });
-        // Maps an individual headword (e.g. "שָׁלָה") back to whichever
-        // full query result it turned up in (e.g. a "שלום" search) — lets
-        // a later, differently-worded search for that exact word find it
-        // offline even without ever having been searched for directly.
-        // See "Partial match fallback" below.
-        if (!db.objectStoreNames.contains("headwords")) db.createObjectStore("headwords", { keyPath: "key" });
+        if (!db.objectStoreNames.contains("entries")) db.createObjectStore("entries", { keyPath: "key" });
+        // Superseded by "entries" (which now holds the actual data a
+        // headword resolves to, not just a pointer to a query) — drop it
+        // rather than leave a second, now-pointless store behind.
+        if (db.objectStoreNames.contains("headwords")) db.deleteObjectStore("headwords");
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -1403,9 +1414,86 @@
     return retrieved.getTime() < staleBefore.getTime();
   }
 
-  // Returns the cached record ({ key, source, query, result, retrievedAt })
-  // for this source+word, or null on a miss — including a stale hit, which
-  // is deleted first so it can't be served again.
+  // Nikud/cantillation marks (U+0591–U+05C7) sit on top of the base
+  // Hebrew letters (U+05D0–U+05EA, outside this range) — stripping them
+  // lets an unvocalized typed query ("שלה") match a vocalized headword
+  // ("שָׁלָה"). No-op on non-Hebrew text.
+  function stripHebrewPoints(str) {
+    return String(str || "").replace(/[\u0591-\u05C7]/g, "");
+  }
+  function normalizeHeadwordKey(str) {
+    return stripHebrewPoints(str).trim().toLowerCase();
+  }
+
+  // Splits one dictionary's already-parsed result into the pieces the
+  // dedup storage needs: `extra` (whatever isn't per-entry — Morfix's
+  // "matched"/corrections, Milog's "found") and `items`, one per entry,
+  // each carrying the headword it should be keyed by and which array it
+  // belongs to (relevant only for Milog's two-array shape).
+  function decomposeResult(source, result) {
+    if (source === "morfix") {
+      const extra = { query: result.query, matched: result.matched, corrections: result.corrections };
+      const items = (result.entries || []).map(e => ({
+        headword: e.senses && e.senses[0] ? e.senses[0].displayText : "",
+        kind: "entry",
+        data: e
+      }));
+      return { extra, items };
+    }
+    if (source === "pealim") {
+      const items = (result.entries || []).map(e => ({ headword: e.headword, kind: "entry", data: e }));
+      return { extra: {}, items };
+    }
+    if (source === "milog") {
+      const extra = { query: result.query, found: result.found };
+      const items = (result.wordEntries || []).map(e => ({ headword: e.headword, kind: "word", data: e }))
+        .concat((result.idioms || []).map(e => ({ headword: e.headword, kind: "idiom", data: e })));
+      return { extra, items };
+    }
+    return { extra: {}, items: [] };
+  }
+
+  // The inverse of decomposeResult: rebuilds the exact shape renderMorfix/
+  // renderPealim/renderMilog expect, from a query's stored `extra` plus
+  // whichever entry items were found for it.
+  function recomposeResult(source, extra, items) {
+    if (source === "morfix") {
+      return { ...extra, entries: items.map(i => i.data) };
+    }
+    if (source === "pealim") {
+      return { entries: items.map(i => i.data) };
+    }
+    if (source === "milog") {
+      return {
+        ...extra,
+        wordEntries: items.filter(i => i.kind === "word").map(i => i.data),
+        idioms: items.filter(i => i.kind === "idiom").map(i => i.data)
+      };
+    }
+    return null;
+  }
+
+  async function getEntryRecord(key) {
+    try {
+      const db = await openSearchCacheDb();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction("entries", "readonly");
+        const req = tx.objectStore("entries").get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Returns { key, source, query, retrievedAt, result } for this
+  // source+word, or null on a miss — including a stale hit, which is
+  // deleted first so it can't be served again. For morfix/pealim/milog,
+  // `result` is reconstructed on the fly from the shared "entries" store;
+  // for anything else (pealim-conj, and any pre-dedup record still sitting
+  // in an existing browser's cache from before this change), the record
+  // already carries its `result` inline, and is returned as-is.
   async function getCachedSearchResult(source, word) {
     try {
       const db = await openSearchCacheDb();
@@ -1421,7 +1509,10 @@
         await deleteCachedSearchResult(source, word);
         return null;
       }
-      return record;
+      if (record.result !== undefined) return record;
+      const items = await Promise.all((record.itemKeys || []).map(k => getEntryRecord(k)));
+      const result = recomposeResult(source, record.extra || {}, items.filter(Boolean));
+      return { key: record.key, source: record.source, query: record.query, retrievedAt: record.retrievedAt, result };
     } catch (e) {
       return null; // IndexedDB unavailable — just treat it as a cache miss
     }
@@ -1430,19 +1521,46 @@
   async function putCachedSearchResult(source, word, result) {
     try {
       const db = await openSearchCacheDb();
-      const record = {
+      const retrievedAt = new Date().toISOString();
+
+      if (!SEARCH_CACHE_DEDUP_SOURCES.has(source)) {
+        const record = { key: searchCacheKey(source, word), source, query: word.trim(), result, retrievedAt };
+        const tx = db.transaction("results", "readwrite");
+        tx.objectStore("results").put(record);
+        await idbTxDone(tx);
+        return;
+      }
+
+      const { extra, items } = decomposeResult(source, result);
+      const tx = db.transaction(["results", "entries"], "readwrite");
+      const entriesStore = tx.objectStore("entries");
+      const itemKeys = items.map((item, idx) => {
+        const normalized = normalizeHeadwordKey(item.headword);
+        // An entry with no usable headword text can't be deduped by word,
+        // so it gets a key scoped to this one query instead — still
+        // stored correctly, just not shared or reachable by the
+        // partial-match fallback.
+        const key = normalized
+          ? `${source}::${normalized}`
+          : `${source}::__noheadword::${normalizeSearchCacheQuery(word)}::${idx}`;
+        entriesStore.put({ key, source, headword: item.headword, kind: item.kind, data: item.data, retrievedAt, sourceQuery: word.trim() });
+        return key;
+      });
+      tx.objectStore("results").put({
         key: searchCacheKey(source, word),
         source,
         query: word.trim(),
-        result,
-        retrievedAt: new Date().toISOString()
-      };
-      const tx = db.transaction("results", "readwrite");
-      tx.objectStore("results").put(record);
+        retrievedAt,
+        extra,
+        itemKeys
+      });
       await idbTxDone(tx);
     } catch (e) { /* ignore — caching is best-effort, not critical to a search succeeding */ }
   }
 
+  // Removes just this one query's "results" record. Deliberately doesn't
+  // touch the shared "entries" store — other still-valid queries (or the
+  // partial-match fallback) may still be pointing at the same entries.
   async function deleteCachedSearchResult(source, word) {
     try {
       const db = await openSearchCacheDb();
@@ -1454,9 +1572,9 @@
 
   async function clearSearchCache() {
     const db = await openSearchCacheDb();
-    const tx = db.transaction(["results", "headwords"], "readwrite");
+    const tx = db.transaction(["results", "entries"], "readwrite");
     tx.objectStore("results").clear();
-    tx.objectStore("headwords").clear();
+    tx.objectStore("entries").clear();
     await idbTxDone(tx);
   }
 
@@ -1470,11 +1588,11 @@
     });
   }
 
-  async function getAllHeadwordRecords() {
+  async function getAllEntryRecords() {
     const db = await openSearchCacheDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction("headwords", "readonly");
-      const req = tx.objectStore("headwords").getAll();
+      const tx = db.transaction("entries", "readonly");
+      const req = tx.objectStore("entries").getAll();
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = () => reject(req.error);
     });
@@ -1497,8 +1615,8 @@
   async function exportSearchCache() {
     const records = await getAllCachedSearchResults();
     if (!records.length) throw new Error("No cached search results yet — search for a few words first.");
-    const headwords = await getAllHeadwordRecords().catch(() => []);
-    const payload = { format: "milon-search-cache", version: 2, exportedAt: new Date().toISOString(), results: records, headwords };
+    const entries = await getAllEntryRecords().catch(() => []);
+    const payload = { format: "milon-search-cache", version: 3, exportedAt: new Date().toISOString(), results: records, entries };
     const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1514,9 +1632,11 @@
   // into whatever's already cached (put() overwrites matching keys, adds
   // new ones) — stale entries among the imported records will simply be
   // treated as misses (and replaced) the next time that word is searched.
-  // The headword index (older exports won't have one) is optional — it
-  // just means partial-match fallback won't work for those older entries
-  // until they're searched for directly again.
+  // A "results" record from either the old (inline `result`) or new
+  // (`itemKeys`/`extra`) format is accepted as-is. An older export's
+  // "headwords" pointers (before entries held real data) aren't something
+  // the current store can use, so they're skipped — those words just
+  // won't have partial-match fallback until searched for again directly.
   async function importSearchCache(jsonText) {
     let payload;
     try {
@@ -1526,18 +1646,24 @@
     }
     const records = payload && Array.isArray(payload.results) ? payload.results : null;
     if (!records) throw new Error("That file doesn't look like a search cache export.");
-    const valid = records.filter(r => r && typeof r.key === "string" && r.source && r.result)
-      .map(({ key, source, query, result, retrievedAt }) => ({ key, source, query, result, retrievedAt }));
+    const valid = records
+      .filter(r => r && typeof r.key === "string" && r.source &&
+        (r.result !== undefined || (r.itemKeys && r.extra !== undefined)))
+      .map(r => ({
+        key: r.key, source: r.source, query: r.query, retrievedAt: r.retrievedAt,
+        ...(r.result !== undefined ? { result: r.result } : {}),
+        ...(r.itemKeys ? { itemKeys: r.itemKeys, extra: r.extra } : {})
+      }));
     if (!valid.length) throw new Error("No usable cache entries found in that file.");
-    const headwordRecords = Array.isArray(payload.headwords) ? payload.headwords : [];
-    const validHeadwords = headwordRecords.filter(r => r && typeof r.key === "string" && r.source && r.headword)
-      .map(({ key, source, headword, query, retrievedAt }) => ({ key, source, headword, query, retrievedAt }));
+    const entryRecords = Array.isArray(payload.entries) ? payload.entries : [];
+    const validEntries = entryRecords.filter(r => r && typeof r.key === "string" && r.source && r.data !== undefined)
+      .map(({ key, source, headword, kind, data, retrievedAt, sourceQuery }) => ({ key, source, headword, kind, data, retrievedAt, sourceQuery }));
     const db = await openSearchCacheDb();
-    const tx = db.transaction(["results", "headwords"], "readwrite");
+    const tx = db.transaction(["results", "entries"], "readwrite");
     const store = tx.objectStore("results");
     valid.forEach(r => store.put(r));
-    const headwordStore = tx.objectStore("headwords");
-    validHeadwords.forEach(r => headwordStore.put(r));
+    const entriesStore = tx.objectStore("entries");
+    validEntries.forEach(r => entriesStore.put(r));
     await idbTxDone(tx);
     return { count: valid.length };
   }
@@ -1552,119 +1678,30 @@
 
   // ---------- Partial match fallback ----------
   // The cache above is keyed by the literal query text, so searching
-  // "שלום" and later "שלה" are unrelated cache entries even though a
-  // Morfix/Pealim/Milog search for "שלום" already returned שָׁלָה as one of
-  // its matches. This index lets a query that has no cache entry of its
-  // own fall back to whatever's already sitting inside some other cached
-  // query's results — a best-effort, clearly-labeled partial answer rather
-  // than nothing, used only when a live fetch has genuinely failed (see
-  // tryHeadwordFallback below). It never overrides a real cache hit or a
-  // successful live search, including one that legitimately found nothing.
-
-  // Nikud/cantillation marks (U+0591–U+05C7) sit on top of the base
-  // Hebrew letters (U+05D0–U+05EA, outside this range) — stripping them
-  // lets an unvocalized typed query ("שלה") match a vocalized headword
-  // ("שָׁלָה"). No-op on non-Hebrew text.
-  function stripHebrewPoints(str) {
-    return String(str || "").replace(/[\u0591-\u05C7]/g, "");
-  }
-  function normalizeHeadwordKey(str) {
-    return stripHebrewPoints(str).trim().toLowerCase();
-  }
-
-  // Pulls the plain headword string(s) out of one dictionary's already-
-  // parsed result shape, whatever that shape happens to be.
-  function extractHeadwords(source, result) {
-    if (!result) return [];
-    if (source === "morfix") {
-      return (result.entries || [])
-        .map(e => (e.senses && e.senses[0] ? e.senses[0].displayText : ""))
-        .filter(Boolean);
-    }
-    if (source === "pealim") {
-      return (result.entries || []).map(e => e.headword).filter(Boolean);
-    }
-    if (source === "milog") {
-      return (result.wordEntries || []).map(e => e.headword)
-        .concat((result.idioms || []).map(e => e.headword))
-        .filter(Boolean);
-    }
-    return [];
-  }
-
-  // Records every headword in a freshly-cached result so a later, narrower
-  // query for one of those words specifically can find it. Best-effort —
-  // this index is a convenience, not required for the main cache to work.
-  async function indexHeadwords(source, query, result) {
-    const headwords = extractHeadwords(source, result);
-    if (!headwords.length) return;
-    try {
-      const db = await openSearchCacheDb();
-      const retrievedAt = new Date().toISOString();
-      const tx = db.transaction("headwords", "readwrite");
-      const store = tx.objectStore("headwords");
-      headwords.forEach(hw => {
-        const normalized = normalizeHeadwordKey(hw);
-        if (!normalized) return;
-        store.put({ key: `${source}::${normalized}`, source, headword: hw, query, retrievedAt });
-      });
-      await idbTxDone(tx);
-    } catch (e) { /* ignore — this index is best-effort */ }
-  }
-
-  async function getHeadwordMatch(source, word) {
-    try {
-      const db = await openSearchCacheDb();
-      const key = `${source}::${normalizeHeadwordKey(word)}`;
-      const record = await new Promise((resolve, reject) => {
-        const tx = db.transaction("headwords", "readonly");
-        const req = tx.objectStore("headwords").get(key);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => reject(req.error);
-      });
-      if (!record || isSearchCacheStale(record.retrievedAt)) return null;
-      return record;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // Narrows a cached FULL search result down to just the one headword a
-  // partial-match fallback is standing in for, so offline "שלה" shows only
-  // שָׁלָה — not every unrelated word that a "שלום" search also happened
-  // to return.
-  function filterResultToHeadword(source, result, normalizedHeadword) {
-    if (!result) return null;
-    if (source === "morfix") {
-      const entries = (result.entries || []).filter(e =>
-        normalizeHeadwordKey(e.senses && e.senses[0] ? e.senses[0].displayText : "") === normalizedHeadword);
-      return entries.length ? { ...result, entries } : null;
-    }
-    if (source === "pealim") {
-      const entries = (result.entries || []).filter(e => normalizeHeadwordKey(e.headword) === normalizedHeadword);
-      return entries.length ? { entries } : null;
-    }
-    if (source === "milog") {
-      const wordEntries = (result.wordEntries || []).filter(e => normalizeHeadwordKey(e.headword) === normalizedHeadword);
-      const idioms = (result.idioms || []).filter(e => normalizeHeadwordKey(e.headword) === normalizedHeadword);
-      return (wordEntries.length || idioms.length) ? { query: result.query, found: true, wordEntries, idioms } : null;
-    }
-    return null;
-  }
-
-  // Only called after a live fetch has failed and there's no cache entry
-  // for the literal query — looks up whether this exact word showed up as
-  // an entry inside some other cached query, and if so, returns just that
-  // entry plus which query and date it came from (for the "partial match"
-  // status line).
+  // "שלום" and later "שלה" would otherwise be unrelated cache entries even
+  // though a Morfix/Pealim/Milog search for "שלום" already returned שָׁלָה
+  // as one of its matches. Because every entry is stored once at its own
+  // headword-keyed address (see decomposeResult/putCachedSearchResult
+  // above), a query with no cache entry of its own can still look that one
+  // word up directly — a best-effort, clearly-labeled partial answer
+  // rather than nothing, used only when a live fetch has genuinely failed.
+  // It never overrides a real cache hit or a successful live search,
+  // including one that legitimately found nothing.
   async function tryHeadwordFallback(source, word) {
-    const match = await getHeadwordMatch(source, word);
-    if (!match) return null;
-    const parent = await getCachedSearchResult(source, match.query);
-    if (!parent) return null;
-    const filtered = filterResultToHeadword(source, parent.result, normalizeHeadwordKey(word));
-    if (!filtered) return null;
-    return { result: filtered, query: match.query, retrievedAt: match.retrievedAt };
+    if (!SEARCH_CACHE_DEDUP_SOURCES.has(source)) return null;
+    const key = `${source}::${normalizeHeadwordKey(word)}`;
+    const entry = await getEntryRecord(key);
+    if (!entry || isSearchCacheStale(entry.retrievedAt)) return null;
+    // Rendering each source's result needs certain top-level fields to be
+    // present and truthy (Morfix's "matched", Milog's "found") — supply
+    // sensible defaults here since there's no parent query to pull them
+    // from when serving a single entry standalone.
+    const extra = source === "morfix" ? { query: word, matched: true, corrections: [] }
+      : source === "milog" ? { query: word, found: true }
+      : {};
+    const result = recomposeResult(source, extra, [entry]);
+    if (!result) return null;
+    return { result, query: entry.sourceQuery || entry.headword, retrievedAt: entry.retrievedAt };
   }
 
   function parsePealimSearchHtml(html) {
@@ -2212,7 +2249,6 @@
       renderPealim(result);
       els.statusPealim.textContent = `via ${via}`;
       await putCachedSearchResult("pealim", word, result);
-      await indexHeadwords("pealim", word, result);
     } catch (err) {
       const fallback = await tryHeadwordFallback("pealim", word);
       if (fallback) {
@@ -2608,7 +2644,6 @@
       renderMilog(result);
       els.statusMilog.textContent = `via ${via}`;
       await putCachedSearchResult("milog", word, result);
-      await indexHeadwords("milog", word, result);
     } catch (err) {
       const fallback = await tryHeadwordFallback("milog", word);
       if (fallback) {
