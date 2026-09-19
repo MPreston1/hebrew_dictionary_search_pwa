@@ -303,21 +303,6 @@
     margin-bottom: 8px;
     line-height: 1.5;
   }
-  .backup-progress-bar {
-    width: 100%;
-    height: 8px;
-    border-radius: 4px;
-    background: var(--paper);
-    border: 1px solid var(--line);
-    overflow: hidden;
-    margin-bottom: 8px;
-  }
-  .backup-progress-bar > div {
-    height: 100%;
-    background: var(--brass);
-    width: 0%;
-    transition: width 0.2s ease;
-  }
   .backup-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
   .backup-buttons button {
     font-family: var(--font-body);
@@ -811,38 +796,6 @@
       <div class="help">Used only to obtain an anonymous auth token, the same way Morfix's own frontend does. Not a secret — this key just identifies the Firebase project. Pealim needs no key at all — it's a plain page fetch.</div>
     </div>
     <div class="field">
-      <label>
-        <input type="checkbox" id="pref-offline-search" style="width:auto; margin-right:6px; vertical-align:middle;">
-        Search Pealim from the offline backup instead of the live site
-      </label>
-      <div class="help">When checked, Pealim searches always use the local backup below — no live request is made, and results won't include anything crawled since your last backup.</div>
-    </div>
-    <div class="field">
-      <label>Offline backup (Pealim)</label>
-      <div class="backup-status-line" id="backup-status">Checking cache…</div>
-      <div class="backup-progress-bar"><div id="backup-progress-fill"></div></div>
-      <div class="backup-buttons">
-        <button type="button" id="backup-start" class="primary">Start / resume backup</button>
-        <button type="button" id="backup-pause" disabled>Pause</button>
-        <button type="button" id="backup-clear">Clear offline cache</button>
-      </div>
-      <div class="backup-buttons" style="margin-top:8px;">
-        <button type="button" id="backup-export">Download backup as JSON</button>
-        <button type="button" id="backup-import">Import backup from JSON…</button>
-        <input type="file" id="backup-import-file" accept="application/json,.json" hidden>
-      </div>
-      <div class="help">
-        Crawls pealim.com's full "All words" listing (~9,000 entries) plus full conjugation
-        tables for every verb, and stores it all in this browser's IndexedDB so Pealim
-        searches work offline. Takes a while the first time (many small requests through
-        the same CORS proxy chain above) — safe to pause and resume anytime, including after
-        closing the app. Use the checkbox above to actually search it; use "Download backup
-        as JSON" to save a copy (e.g. to move it to another browser or device), and "Import
-        backup from JSON" to load a previously downloaded copy instead of re-crawling from
-        scratch — importing merges into whatever's already cached here.
-      </div>
-    </div>
-    <div class="field">
       <label>Search result cache</label>
       <div class="backup-status-line" id="search-cache-status">Checking cache…</div>
       <div class="backup-buttons">
@@ -928,9 +881,7 @@
     enabled: { morfix: true, pealim: true, milog: true },
     morfix: { lastResult: null, lastRaw: null },
     pealim: { lastResult: null, lastRawHtml: null },
-    milog: { lastResult: null, lastRawHtml: null },
-    backup: { running: false, abortRequested: false },
-    preferOfflineSearch: (() => { try { return localStorage.getItem("milon-pealim-prefer-offline") === "1"; } catch (e) { return false; } })()
+    milog: { lastResult: null, lastRawHtml: null }
   };
 
   // ---------- Elements ----------
@@ -968,15 +919,6 @@
     rawJson: document.getElementById("raw-json"),
     rawClose: document.getElementById("raw-close"),
     hoverTooltip: document.getElementById("hover-tooltip"),
-    backupStatus: document.getElementById("backup-status"),
-    backupProgressFill: document.getElementById("backup-progress-fill"),
-    backupStart: document.getElementById("backup-start"),
-    backupPause: document.getElementById("backup-pause"),
-    backupClear: document.getElementById("backup-clear"),
-    prefOfflineSearch: document.getElementById("pref-offline-search"),
-    backupExport: document.getElementById("backup-export"),
-    backupImport: document.getElementById("backup-import"),
-    backupImportFile: document.getElementById("backup-import-file"),
     searchCacheStatus: document.getElementById("search-cache-status"),
     searchCacheExport: document.getElementById("search-cache-export"),
     searchCacheImport: document.getElementById("search-cache-import"),
@@ -989,7 +931,6 @@
   els.openSettings.addEventListener("click", () => {
     els.firebaseKeyField.value = state.firebaseKey;
     els.dialog.showModal();
-    refreshBackupStatusIdle();
     refreshSearchCacheStatus();
   });
   els.settingsCancel.addEventListener("click", () => els.dialog.close());
@@ -998,67 +939,6 @@
     state.token = null;
     els.dialog.close();
   });
-
-  els.backupStart.addEventListener("click", () => { runOfflineBackup(); });
-  els.backupPause.addEventListener("click", () => {
-    state.backup.abortRequested = true;
-    els.backupPause.disabled = true;
-  });
-  els.backupClear.addEventListener("click", async () => {
-    if (!confirm("Clear all offline Pealim data cached in this browser?")) return;
-    els.backupClear.disabled = true;
-    try {
-      await idbClearAll();
-      await refreshBackupStatusIdle();
-    } catch (e) {
-      updateBackupProgressUI(`Couldn't clear cache: ${e.message}`, 0);
-    } finally {
-      els.backupClear.disabled = false;
-    }
-  });
-
-  els.prefOfflineSearch.checked = state.preferOfflineSearch;
-  els.prefOfflineSearch.addEventListener("change", () => {
-    state.preferOfflineSearch = els.prefOfflineSearch.checked;
-    try { localStorage.setItem("milon-pealim-prefer-offline", state.preferOfflineSearch ? "1" : "0"); } catch (e) { /* ignore */ }
-  });
-
-  els.backupExport.addEventListener("click", async () => {
-    els.backupExport.disabled = true;
-    const originalLabel = els.backupExport.textContent;
-    els.backupExport.textContent = "Preparing…";
-    try {
-      await exportOfflineBackup();
-    } catch (e) {
-      alert(`Couldn't export backup: ${e.message}`);
-    } finally {
-      els.backupExport.disabled = false;
-      els.backupExport.textContent = originalLabel;
-    }
-  });
-
-  els.backupImport.addEventListener("click", () => els.backupImportFile.click());
-  els.backupImportFile.addEventListener("change", async () => {
-    const file = els.backupImportFile.files && els.backupImportFile.files[0];
-    els.backupImportFile.value = ""; // allow re-selecting the same file later
-    if (!file) return;
-    els.backupImport.disabled = true;
-    const originalLabel = els.backupImport.textContent;
-    els.backupImport.textContent = "Importing…";
-    try {
-      const text = await file.text();
-      const summary = await importOfflineBackup(text);
-      await refreshBackupStatusIdle();
-      alert(`Imported ${summary.listing} listing entries and ${summary.verbs} verb tables.`);
-    } catch (e) {
-      alert(`Couldn't import backup: ${e.message}`);
-    } finally {
-      els.backupImport.disabled = false;
-      els.backupImport.textContent = originalLabel;
-    }
-  });
-
-  refreshBackupStatusIdle();
 
   // ---------- Search result cache UI ----------
   async function refreshSearchCacheStatus() {
@@ -1453,31 +1333,6 @@
     return { html: data, via };
   }
 
-  // ---------- Offline backup (IndexedDB) ----------
-  // Mirrors the JNW backup/crawl approach: walk pealim.com's own paginated
-  // "All words" listing, store every entry, then fetch full conjugation
-  // tables for the verb entries. All of it lands in IndexedDB so Pealim
-  // search can work without a network connection.
-  const OFFLINE_DB_NAME = "milon-pealim-offline";
-  const OFFLINE_DB_VERSION = 1;
-  let offlineDbPromise = null;
-
-  function openOfflineDb() {
-    if (offlineDbPromise) return offlineDbPromise;
-    offlineDbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains("listing")) db.createObjectStore("listing", { keyPath: "id" });
-        if (!db.objectStoreNames.contains("verbs")) db.createObjectStore("verbs", { keyPath: "id" });
-        if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "key" });
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-    return offlineDbPromise;
-  }
-
   function idbTxDone(tx) {
     return new Promise((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -1486,109 +1341,14 @@
     });
   }
 
-  async function idbPutAll(storeName, records) {
-    const db = await openOfflineDb();
-    const tx = db.transaction(storeName, "readwrite");
-    const store = tx.objectStore(storeName);
-    records.forEach(r => store.put(r));
-    await idbTxDone(tx);
-  }
-
-  async function idbGet(storeName, key) {
-    const db = await openOfflineDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, "readonly");
-      const req = tx.objectStore(storeName).get(key);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  async function idbGetAll(storeName) {
-    const db = await openOfflineDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, "readonly");
-      const req = tx.objectStore(storeName).getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  async function idbCount(storeName) {
-    const db = await openOfflineDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, "readonly");
-      const req = tx.objectStore(storeName).count();
-      req.onsuccess = () => resolve(req.result || 0);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  async function idbClearAll() {
-    const db = await openOfflineDb();
-    const tx = db.transaction(["listing", "verbs", "meta"], "readwrite");
-    tx.objectStore("listing").clear();
-    tx.objectStore("verbs").clear();
-    tx.objectStore("meta").clear();
-    await idbTxDone(tx);
-  }
-
-  // Exports everything currently cached (listing + verb tables + progress
-  // meta) as a single downloadable JSON file, so it can be moved to
-  // another browser/device without re-crawling pealim.com from scratch.
-  async function exportOfflineBackup() {
-    const [listing, verbs, meta] = await Promise.all([
-      idbGetAll("listing"), idbGetAll("verbs"), idbGetAll("meta")
-    ]);
-    if (!listing.length) throw new Error("Nothing cached yet — run a backup first.");
-    const payload = { format: "milon-pealim-offline-backup", version: 1, exportedAt: new Date().toISOString(), listing, verbs, meta };
-    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `pealim-offline-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  // Imports a JSON file previously produced by exportOfflineBackup(). This
-  // merges into whatever's already cached (idbPutAll uses put(), which
-  // overwrites matching keys and adds new ones) rather than replacing it —
-  // use "Clear offline cache" first if you want a clean replace instead.
-  async function importOfflineBackup(jsonText) {
-    let payload;
-    try {
-      payload = JSON.parse(jsonText);
-    } catch (e) {
-      throw new Error("That file isn't valid JSON.");
-    }
-    if (!payload || !Array.isArray(payload.listing)) {
-      throw new Error("That file doesn't look like a Pealim offline backup export.");
-    }
-    if (payload.listing.length) await idbPutAll("listing", payload.listing);
-    if (Array.isArray(payload.verbs) && payload.verbs.length) await idbPutAll("verbs", payload.verbs);
-    if (Array.isArray(payload.meta) && payload.meta.length) await idbPutAll("meta", payload.meta);
-    return { listing: payload.listing.length, verbs: Array.isArray(payload.verbs) ? payload.verbs.length : 0 };
-  }
-
-  async function metaGet(key, fallback) {
-    const rec = await idbGet("meta", key);
-    return rec ? rec.value : fallback;
-  }
-  async function metaSet(key, value) {
-    await idbPutAll("meta", [{ key, value }]);
-  }
-
   // ---------- Search results cache (IndexedDB) ----------
-  // Separate from the Pealim offline backup above: this caches the actual
-  // per-query parsed results from each of the three live dictionary
+  // Caches the parsed results from each of the three live dictionary
   // lookups (not the raw response — just what's needed to re-render),
   // keyed by source+word, so re-searching the same word doesn't hit the
   // network again. A cached entry older than SEARCH_CACHE_STALE_MONTHS is
   // treated as a miss, erased, and replaced by a fresh live fetch (which
-  // then gets cached again).
+  // then gets cached again). Also used for Pealim's per-verb conjugation
+  // tables (source "pealim-conj", keyed by the verb's dictUrl).
   const SEARCH_CACHE_DB_NAME = "milon-search-cache";
   const SEARCH_CACHE_DB_VERSION = 1;
   const SEARCH_CACHE_STALE_MONTHS = 3;
@@ -1749,214 +1509,6 @@
     } catch (e) {
       return iso;
     }
-  }
-
-  // Cache-busting: corsproxy.io and the other fallback proxies sometimes
-  // cache the upstream response, which would otherwise leave the crawl
-  // stuck re-fetching a stale copy of the same listing page. Appending a
-  // throwaway query param defeats that without affecting the actual page
-  // pealim.com serves.
-  function bustCache(url) {
-    const sep = url.includes("?") ? "&" : "?";
-    return `${url}${sep}_ts=${Date.now()}`;
-  }
-
-  // Parses one page of https://www.pealim.com/dict/?page=N — the same
-  // table.dict-table-t structure parsePealimSearchHtml already parses for
-  // live search results.
-  function parsePealimDictListingHtml(html) {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const entries = [];
-    const table = doc.querySelector("table.dict-table-t");
-    if (!table) return entries;
-
-    table.querySelectorAll("tbody tr").forEach(tr => {
-      const lemmaCell = tr.querySelector(".dict-lemma");
-      const link = tr.querySelector(".dict-lemma a");
-      if (!lemmaCell || !link) return;
-
-      const headword = (lemmaCell.querySelector(".menukad") || {}).textContent?.trim() || "";
-      let dictUrl = "";
-      try { dictUrl = new URL(link.getAttribute("href"), "https://www.pealim.com").href; } catch (e) { /* skip */ }
-      if (!headword || !dictUrl) return;
-
-      const lemmaClone = lemmaCell.cloneNode(true);
-      lemmaClone.querySelectorAll("a, .audio-play").forEach(n => n.remove());
-      const transliteration = lemmaClone.textContent.trim();
-
-      const cells = tr.querySelectorAll("td");
-      const rootCell = cells[1];
-      const rootLink = rootCell ? rootCell.querySelector("a") : null;
-      const root = (rootLink ? rootLink.textContent : rootCell ? rootCell.textContent : "").trim();
-      const partOfSpeech = (cells[2] ? cells[2].textContent : "").trim();
-      const isVerb = /^verb/i.test(partOfSpeech);
-      const meaning = (tr.querySelector(".dict-meaning") || {}).textContent?.trim() || "";
-
-      const idMatch = dictUrl.match(/\/dict\/(\d+)-/);
-      entries.push({
-        id: idMatch ? idMatch[1] : dictUrl,
-        headword, transliteration, dictUrl, root, partOfSpeech, isVerb, meaning
-      });
-    });
-    return entries;
-  }
-
-  function detectTotalListingPages(html) {
-    const bodyText = new DOMParser().parseFromString(html, "text/html").body.textContent;
-    const m = bodyText.match(/of\s+([\d,]+)\s+words/i);
-    if (m) return Math.ceil(parseInt(m[1].replace(/,/g, ""), 10) / 15);
-    return null;
-  }
-
-  function updateBackupProgressUI(text, fraction) {
-    if (els.backupStatus) els.backupStatus.textContent = text;
-    if (els.backupProgressFill && typeof fraction === "number") {
-      els.backupProgressFill.style.width = `${Math.max(0, Math.min(100, fraction * 100))}%`;
-    }
-  }
-
-  async function refreshBackupStatusIdle() {
-    try {
-      const [listingCount, verbCount, lastPage, totalPages, lastCompletedAt] = await Promise.all([
-        idbCount("listing"), idbCount("verbs"),
-        metaGet("listingLastPage", 0), metaGet("listingTotalPages", null),
-        metaGet("lastCompletedAt", null)
-      ]);
-      const doneNote = lastCompletedAt ? ` — last full backup: ${new Date(lastCompletedAt).toLocaleString()}` : "";
-      const pageNote = totalPages ? ` (listing page ${lastPage}/${totalPages})` : "";
-      updateBackupProgressUI(
-        `${listingCount} entries cached, ${verbCount} verb tables cached${pageNote}${doneNote}`,
-        totalPages ? lastPage / totalPages : 0
-      );
-    } catch (e) {
-      updateBackupProgressUI("Offline cache not available in this browser.", 0);
-    }
-  }
-
-  async function runOfflineBackup() {
-    if (state.backup.running) return;
-    state.backup.running = true;
-    state.backup.abortRequested = false;
-    els.backupStart.disabled = true;
-    els.backupPause.disabled = false;
-    els.backupClear.disabled = true;
-
-    try {
-      // ---- Phase 1: listing pages ----
-      let lastPage = await metaGet("listingLastPage", 0);
-      let totalPages = await metaGet("listingTotalPages", null);
-
-      if (!totalPages) {
-        updateBackupProgressUI("Fetching page 1 to find out how many pages there are…", 0);
-        const { html } = await fetchPealimPage(bustCache("https://www.pealim.com/dict/?page=1"));
-        totalPages = detectTotalListingPages(html) || 619;
-        await metaSet("listingTotalPages", totalPages);
-        const entries = parsePealimDictListingHtml(html);
-        if (entries.length) await idbPutAll("listing", entries);
-        lastPage = 1;
-        await metaSet("listingLastPage", 1);
-      }
-
-      for (let page = lastPage + 1; page <= totalPages; page++) {
-        if (state.backup.abortRequested) { updateBackupProgressUI(`Paused at listing page ${page - 1}/${totalPages}.`, (page - 1) / totalPages); return; }
-        updateBackupProgressUI(`Backing up dictionary listing — page ${page}/${totalPages}…`, page / totalPages);
-        const { html } = await fetchPealimPage(bustCache(`https://www.pealim.com/dict/?page=${page}`));
-        const entries = parsePealimDictListingHtml(html);
-        if (entries.length) await idbPutAll("listing", entries);
-        await metaSet("listingLastPage", page);
-      }
-
-      // ---- Phase 2: verb conjugation tables ----
-      const allEntries = await idbGetAll("listing");
-      const verbEntries = allEntries.filter(e => e.isVerb);
-      let verbsDone = 0;
-      for (const entry of verbEntries) {
-        if (state.backup.abortRequested) {
-          updateBackupProgressUI(`Paused — ${verbsDone}/${verbEntries.length} verb tables cached.`, verbsDone / verbEntries.length);
-          return;
-        }
-        const existing = await idbGet("verbs", entry.id);
-        if (existing) { verbsDone++; continue; }
-
-        updateBackupProgressUI(`Backing up conjugation tables — ${verbsDone}/${verbEntries.length} verbs (${entry.headword})…`, verbsDone / verbEntries.length);
-        try {
-          const { html } = await fetchPealimPage(bustCache(entry.dictUrl));
-          const cellsById = extractCellsById(html);
-          if (cellsById) {
-            const plainForms = {};
-            Object.keys(cellsById).forEach(id => {
-              const div = cellsById[id];
-              plainForms[id] = {
-                menukad: (div.querySelector(".menukad") || {}).textContent?.trim() || "",
-                chaser: (div.querySelector(".chaser") || {}).textContent?.trim() || "",
-                transcription: (div.querySelector(".transcription") || {}).textContent?.trim() || ""
-              };
-            });
-            await idbPutAll("verbs", [{ id: entry.id, forms: plainForms }]);
-          }
-        } catch (err) {
-          // One verb page failing (bad proxy response, timeout) shouldn't
-          // stop the whole backup — log it and move on; it'll just be
-          // retried on the next backup run since it's not marked done.
-          console.warn(`Offline backup: failed on ${entry.headword} (${entry.dictUrl}): ${err.message}`);
-        }
-        verbsDone++;
-      }
-
-      await metaSet("lastCompletedAt", Date.now());
-      updateBackupProgressUI(`Backup complete — ${allEntries.length} entries, ${verbsDone} verb tables cached.`, 1);
-    } catch (err) {
-      updateBackupProgressUI(`Backup stopped: ${err.message}`, undefined);
-    } finally {
-      state.backup.running = false;
-      els.backupStart.disabled = false;
-      els.backupPause.disabled = true;
-      els.backupClear.disabled = false;
-    }
-  }
-
-  function stripNikkud(s) {
-    return (s || "").normalize("NFC").replace(/[\u0591-\u05C7]/g, "");
-  }
-  function normalizeForOfflineSearch(s) {
-    return stripNikkud(s || "").toLowerCase().trim();
-  }
-
-  // Offline fallback search: since we don't have pealim's live search-ranking
-  // logic, this does a simple substring match across headword, root-stripped
-  // transliteration, and English gloss. Good enough to find a word you know
-  // roughly, not a full replacement for the live search's fuzziness.
-  async function searchOfflineCache(word) {
-    let all;
-    try {
-      all = await idbGetAll("listing");
-    } catch (e) {
-      return null; // IndexedDB unavailable — nothing we can do offline
-    }
-    if (!all.length) return null;
-
-    const q = normalizeForOfflineSearch(word);
-    const matches = all.filter(e =>
-      normalizeForOfflineSearch(e.headword).includes(q) ||
-      normalizeForOfflineSearch(e.transliteration).includes(q) ||
-      normalizeForOfflineSearch(e.meaning).includes(q)
-    ).slice(0, 25);
-    if (!matches.length) return null;
-
-    const entries = await Promise.all(matches.map(async m => {
-      let offlineForms = null;
-      if (m.isVerb) {
-        const rec = await idbGet("verbs", m.id);
-        if (rec) offlineForms = rec.forms;
-      }
-      return {
-        headword: m.headword, dictUrl: m.dictUrl, root: m.root,
-        partOfSpeech: m.partOfSpeech, isVerb: m.isVerb, meaning: m.meaning,
-        hasFullTable: !!offlineForms, forms: [], tableNode: null, expanded: false,
-        offlineForms
-      };
-    }));
-    return { entries };
   }
 
   function parsePealimSearchHtml(html) {
@@ -2227,18 +1779,16 @@
   }
 
   // Renders a single conjugation cell's content from either a live DOM node
-  // (fetched fresh from pealim.com, sanitized against an allowlist), a
-  // plain {menukad, chaser, transcription} object pulled from the offline
-  // IndexedDB cache (see buildOfflineCellContent below), or a {html: "..."}
-  // object pulled from the search-results cache (already-sanitized markup,
-  // see serializeCellsById below). All three are used interchangeably by
-  // buildPairCell/buildVerbTablesNode so the same rendering code works
-  // regardless of where a verb's table data came from.
+  // (fetched fresh from pealim.com, sanitized against an allowlist) or a
+  // {html: "..."} object pulled from the search-results cache
+  // (already-sanitized markup, see serializeCellsById below). Both are used
+  // interchangeably by buildPairCell/buildVerbTablesNode so the same
+  // rendering code works regardless of where a verb's table data came from.
   function renderFormCell(raw) {
     if (!raw) return null;
     if (raw.nodeType === Node.ELEMENT_NODE) return sanitizeNode(raw);
     if (typeof raw.html === "string") return parseHtmlFragmentToNode(raw.html);
-    return buildOfflineCellContent(raw);
+    return null;
   }
 
   // Turns a stored HTML fragment (already run through sanitizeNode when it
@@ -2259,32 +1809,6 @@
       if (sanitized && sanitized.nodeType === Node.ELEMENT_NODE) out[id] = { html: sanitized.outerHTML };
     });
     return out;
-  }
-
-  function buildOfflineCellContent(formData) {
-    if (!formData || (!formData.menukad && !formData.transcription)) return null;
-    const wrap = document.createElement("div");
-    const line1 = document.createElement("div");
-    if (formData.menukad) {
-      const menukad = document.createElement("span");
-      menukad.className = "menukad";
-      menukad.textContent = formData.menukad;
-      line1.appendChild(menukad);
-    }
-    if (formData.chaser) {
-      const chaser = document.createElement("span");
-      chaser.className = "chaser";
-      chaser.textContent = " ~ " + formData.chaser;
-      line1.appendChild(chaser);
-    }
-    if (line1.children.length) wrap.appendChild(line1);
-    if (formData.transcription) {
-      const t = document.createElement("div");
-      t.className = "transcription";
-      t.textContent = formData.transcription;
-      wrap.appendChild(t);
-    }
-    return wrap.children.length ? wrap : null;
   }
 
   function buildPairCell(id, pronouns, cellsById) {
@@ -2455,9 +1979,7 @@
     let cacheNote = null;
     try {
       if (!entry.tableNode) {
-        if (entry.offlineForms) {
-          entry.tableNode = entry.isVerb ? buildVerbTablesNode(entry.offlineForms) : null;
-        } else if (entry.dictUrl) {
+        if (entry.dictUrl) {
           const cached = await getCachedSearchResult("pealim-conj", entry.dictUrl);
           if (cached) {
             if (cached.result.kind === "verb") entry.tableNode = buildVerbTablesNode(cached.result.cells);
@@ -2510,26 +2032,6 @@
     els.statusPealim.textContent = "Searching…";
     els.statusPealim.classList.remove("error");
     els.refreshPealim.hidden = true;
-
-    if (state.preferOfflineSearch) {
-      try {
-        const cached = await searchOfflineCache(word);
-        if (cached) {
-          state.pealim.lastResult = cached;
-          renderPealim(cached);
-          els.statusPealim.textContent = "via offline backup";
-          return;
-        }
-        els.statusPealim.textContent = "No matching entry in the offline backup.";
-        els.statusPealim.classList.add("error");
-        renderPealim({ entries: [] });
-        return;
-      } catch (err) {
-        els.statusPealim.textContent = `Couldn't read the offline backup: ${err.message}`;
-        els.statusPealim.classList.add("error");
-        return;
-      }
-    }
 
     if (!forceRefresh) {
       const cached = await getCachedSearchResult("pealim", word);
