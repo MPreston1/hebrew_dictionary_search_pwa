@@ -1106,6 +1106,12 @@
     try {
       await clearSearchCache();
       await refreshSearchCacheStatus();
+      // Nothing on screen is backed by the cache anymore — drop the
+      // "Refresh" links so the columns don't keep implying otherwise
+      // until the next search.
+      els.refreshMorfix.hidden = true;
+      els.refreshPealim.hidden = true;
+      els.refreshMilog.hidden = true;
     } catch (e) {
       alert(`Couldn't clear search cache: ${e.message}`);
     } finally {
@@ -1391,9 +1397,9 @@
     if (!forceRefresh) {
       const cached = await getCachedSearchResult("morfix", word);
       if (cached) {
-        state.morfix.lastRaw = cached.raw;
+        state.morfix.lastRaw = null;
         state.morfix.lastResult = cached.result;
-        els.viewRawMorfix.hidden = !cached.raw;
+        els.viewRawMorfix.hidden = true;
         renderMorfix(cached.result);
         els.statusMorfix.textContent = `cached · retrieved ${formatCacheDate(cached.retrievedAt)}`;
         els.refreshMorfix.hidden = false;
@@ -1409,7 +1415,7 @@
       state.morfix.lastResult = result;
       renderMorfix(result);
       els.statusMorfix.textContent = `via ${via}`;
-      await putCachedSearchResult("morfix", word, { result, raw: data });
+      await putCachedSearchResult("morfix", word, result);
     } catch (err) {
       els.statusMorfix.textContent = err.message;
       els.statusMorfix.classList.add("error");
@@ -1564,11 +1570,12 @@
 
   // ---------- Search results cache (IndexedDB) ----------
   // Separate from the Pealim offline backup above: this caches the actual
-  // per-query results (parsed entry + raw response) from each of the three
-  // live dictionary lookups, keyed by source+word, so re-searching the same
-  // word doesn't hit the network again. A cached entry older than
-  // SEARCH_CACHE_STALE_MONTHS is treated as a miss, erased, and replaced by
-  // a fresh live fetch (which then gets cached again).
+  // per-query parsed results from each of the three live dictionary
+  // lookups (not the raw response — just what's needed to re-render),
+  // keyed by source+word, so re-searching the same word doesn't hit the
+  // network again. A cached entry older than SEARCH_CACHE_STALE_MONTHS is
+  // treated as a miss, erased, and replaced by a fresh live fetch (which
+  // then gets cached again).
   const SEARCH_CACHE_DB_NAME = "milon-search-cache";
   const SEARCH_CACHE_DB_VERSION = 1;
   const SEARCH_CACHE_STALE_MONTHS = 3;
@@ -1604,9 +1611,9 @@
     return retrieved.getTime() < staleBefore.getTime();
   }
 
-  // Returns the cached record ({ key, source, query, result, raw,
-  // retrievedAt }) for this source+word, or null on a miss — including a
-  // stale hit, which is deleted first so it can't be served again.
+  // Returns the cached record ({ key, source, query, result, retrievedAt })
+  // for this source+word, or null on a miss — including a stale hit, which
+  // is deleted first so it can't be served again.
   async function getCachedSearchResult(source, word) {
     try {
       const db = await openSearchCacheDb();
@@ -1628,7 +1635,7 @@
     }
   }
 
-  async function putCachedSearchResult(source, word, { result, raw }) {
+  async function putCachedSearchResult(source, word, result) {
     try {
       const db = await openSearchCacheDb();
       const record = {
@@ -1636,7 +1643,6 @@
         source,
         query: word.trim(),
         result,
-        raw: raw === undefined ? null : raw,
         retrievedAt: new Date().toISOString()
       };
       const tx = db.transaction("results", "readwrite");
@@ -1713,7 +1719,8 @@
     }
     const records = payload && Array.isArray(payload.results) ? payload.results : null;
     if (!records) throw new Error("That file doesn't look like a search cache export.");
-    const valid = records.filter(r => r && typeof r.key === "string" && r.source && r.result);
+    const valid = records.filter(r => r && typeof r.key === "string" && r.source && r.result)
+      .map(({ key, source, query, result, retrievedAt }) => ({ key, source, query, result, retrievedAt }));
     if (!valid.length) throw new Error("No usable cache entries found in that file.");
     const db = await openSearchCacheDb();
     const tx = db.transaction("results", "readwrite");
@@ -2472,9 +2479,9 @@
     if (!forceRefresh) {
       const cached = await getCachedSearchResult("pealim", word);
       if (cached) {
-        state.pealim.lastRawHtml = cached.raw;
+        state.pealim.lastRawHtml = null;
         state.pealim.lastResult = cached.result;
-        els.viewRawPealim.hidden = !cached.raw;
+        els.viewRawPealim.hidden = true;
         renderPealim(cached.result);
         els.statusPealim.textContent = `cached · retrieved ${formatCacheDate(cached.retrievedAt)}`;
         els.refreshPealim.hidden = false;
@@ -2491,7 +2498,7 @@
       state.pealim.lastResult = result;
       renderPealim(result);
       els.statusPealim.textContent = `via ${via}`;
-      await putCachedSearchResult("pealim", word, { result, raw: html });
+      await putCachedSearchResult("pealim", word, result);
     } catch (err) {
       els.statusPealim.textContent = err.message;
       els.statusPealim.classList.add("error");
@@ -2857,9 +2864,9 @@
     if (!forceRefresh) {
       const cached = await getCachedSearchResult("milog", word);
       if (cached) {
-        state.milog.lastRawHtml = cached.raw;
+        state.milog.lastRawHtml = null;
         state.milog.lastResult = cached.result;
-        els.viewRawMilog.hidden = !cached.raw;
+        els.viewRawMilog.hidden = true;
         renderMilog(cached.result);
         els.statusMilog.textContent = `cached · retrieved ${formatCacheDate(cached.retrievedAt)}`;
         els.refreshMilog.hidden = false;
@@ -2876,7 +2883,7 @@
       state.milog.lastResult = result;
       renderMilog(result);
       els.statusMilog.textContent = `via ${via}`;
-      await putCachedSearchResult("milog", word, { result, raw: html });
+      await putCachedSearchResult("milog", word, result);
     } catch (err) {
       els.statusMilog.textContent = err.message;
       els.statusMilog.classList.add("error");
