@@ -168,6 +168,12 @@
     min-height: 1.2em;
   }
   .status-line.error { color: var(--error); }
+  .conj-cache-note {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+    margin-bottom: 4px;
+  }
 
   .link-button {
     background: none;
@@ -846,12 +852,14 @@
         <button type="button" id="search-cache-clear">Clear cache</button>
       </div>
       <div class="help">
-        Every Morfix/Pealim/Milog search result is stored here (with its source and the date it was
-        retrieved), so searching the same word again reuses it instead of hitting the network. A cached
-        result older than 3 months is treated as stale and automatically replaced by a fresh live lookup.
-        Each dictionary column shows a "Refresh" link when it's displaying a cached result, to force a new
-        lookup early. Use "Export as JSON" to save a copy of this cache and "Import JSON" to load one back in
-        (importing merges into whatever's already cached here).
+        Every Morfix/Pealim/Milog search result — and every Pealim conjugation table you expand
+        with "View full conjugation"/"View all forms" — is stored here (with its source and the
+        date it was retrieved), so repeating the same lookup reuses it instead of hitting the
+        network. A cached result older than 3 months is treated as stale and automatically
+        replaced by a fresh live lookup. Each dictionary column shows a "Refresh" link when it's
+        displaying a cached result, to force a new lookup early. Use "Export as JSON" to save a
+        copy of this cache and "Import JSON" to load one back in (importing merges into whatever's
+        already cached here).
       </div>
     </div>
     <div class="field">
@@ -2219,16 +2227,38 @@
   }
 
   // Renders a single conjugation cell's content from either a live DOM node
-  // (fetched fresh from pealim.com, sanitized against an allowlist) or a
+  // (fetched fresh from pealim.com, sanitized against an allowlist), a
   // plain {menukad, chaser, transcription} object pulled from the offline
-  // IndexedDB cache (see buildOfflineCellContent below). Both paths are
-  // used interchangeably by buildPairCell/buildVerbTablesNode so the same
-  // rendering code works whether a verb's table came from the network or
-  // from the offline backup.
+  // IndexedDB cache (see buildOfflineCellContent below), or a {html: "..."}
+  // object pulled from the search-results cache (already-sanitized markup,
+  // see serializeCellsById below). All three are used interchangeably by
+  // buildPairCell/buildVerbTablesNode so the same rendering code works
+  // regardless of where a verb's table data came from.
   function renderFormCell(raw) {
     if (!raw) return null;
     if (raw.nodeType === Node.ELEMENT_NODE) return sanitizeNode(raw);
+    if (typeof raw.html === "string") return parseHtmlFragmentToNode(raw.html);
     return buildOfflineCellContent(raw);
+  }
+
+  // Turns a stored HTML fragment (already run through sanitizeNode when it
+  // was cached, so this never executes scripts) back into a live DOM node.
+  function parseHtmlFragmentToNode(html) {
+    const tmp = document.createElement("template");
+    tmp.innerHTML = html;
+    return tmp.content.firstElementChild ? tmp.content.firstElementChild.cloneNode(true) : null;
+  }
+
+  // Converts a live cellsById map (raw, not-yet-sanitized DOM divs, as
+  // returned by extractCellsById) into a plain, IndexedDB-storable object —
+  // sanitized once up front so nothing unsafe ever reaches the cache.
+  function serializeCellsById(cellsById) {
+    const out = {};
+    Object.keys(cellsById).forEach(id => {
+      const sanitized = sanitizeNode(cellsById[id]);
+      if (sanitized && sanitized.nodeType === Node.ELEMENT_NODE) out[id] = { html: sanitized.outerHTML };
+    });
+    return out;
   }
 
   function buildOfflineCellContent(formData) {
@@ -2422,25 +2452,45 @@
     btn.disabled = true;
     const originalLabel = btn.textContent;
     btn.textContent = "Loading…";
+    let cacheNote = null;
     try {
       if (!entry.tableNode) {
         if (entry.offlineForms) {
           entry.tableNode = entry.isVerb ? buildVerbTablesNode(entry.offlineForms) : null;
-        } else {
-          const { html } = await fetchPealimPage(entry.dictUrl);
-          state.pealim.lastRawHtml = html;
-          els.viewRawPealim.hidden = false;
-          if (entry.isVerb) {
-            const cellsById = extractCellsById(html);
-            entry.tableNode = cellsById ? buildVerbTablesNode(cellsById) : null;
+        } else if (entry.dictUrl) {
+          const cached = await getCachedSearchResult("pealim-conj", entry.dictUrl);
+          if (cached) {
+            if (cached.result.kind === "verb") entry.tableNode = buildVerbTablesNode(cached.result.cells);
+            else if (cached.result.kind === "table") entry.tableNode = parseHtmlFragmentToNode(cached.result.html);
+            else entry.tableNode = null;
+            cacheNote = `cached · retrieved ${formatCacheDate(cached.retrievedAt)}`;
           } else {
-            entry.tableNode = extractConjugationTableNode(html);
+            const { html } = await fetchPealimPage(entry.dictUrl);
+            state.pealim.lastRawHtml = html;
+            els.viewRawPealim.hidden = false;
+            if (entry.isVerb) {
+              const cellsById = extractCellsById(html);
+              entry.tableNode = cellsById ? buildVerbTablesNode(cellsById) : null;
+              await putCachedSearchResult("pealim-conj", entry.dictUrl,
+                cellsById ? { kind: "verb", cells: serializeCellsById(cellsById) } : { kind: "none" });
+            } else {
+              const tableNode = extractConjugationTableNode(html);
+              entry.tableNode = tableNode;
+              await putCachedSearchResult("pealim-conj", entry.dictUrl,
+                tableNode ? { kind: "table", html: tableNode.outerHTML } : { kind: "none" });
+            }
           }
         }
       }
       wrap.innerHTML = "";
       if (entry.tableNode) {
         wrap.appendChild(entry.tableNode.cloneNode(true));
+        if (cacheNote) {
+          const note = document.createElement("div");
+          note.className = "conj-cache-note";
+          note.textContent = cacheNote;
+          wrap.insertBefore(note, wrap.firstChild);
+        }
       } else {
         wrap.textContent = "Couldn't find a conjugation table on that page.";
       }
