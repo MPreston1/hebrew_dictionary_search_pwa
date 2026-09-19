@@ -1198,10 +1198,15 @@
   });
 
   // ---------- Timeout + auth helpers ----------
+  // cache: "no-store" is essential here, not just tidy: without it the
+  // browser's own HTTP cache can silently serve an old response for these
+  // proxy URLs — even with no network connection at all — completely
+  // bypassing the app's own IndexedDB search cache and its 3-month
+  // staleness/"Clear cache" logic. This keeps that cache the only cache.
   function fetchWithTimeout(url, options, timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+    return fetch(url, { ...options, cache: "no-store", signal: controller.signal }).finally(() => clearTimeout(timer));
   }
 
   async function getToken() {
@@ -1209,7 +1214,7 @@
     if (state.token && now < state.tokenExpiresAt) return state.token;
     const resp = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(state.firebaseKey)}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ returnSecureToken: true }) }
+      { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ returnSecureToken: true }) }
     );
     if (!resp.ok) throw new Error(`Firebase auth failed (${resp.status}). Check the Firebase API key in Settings.`);
     const data = await resp.json();
