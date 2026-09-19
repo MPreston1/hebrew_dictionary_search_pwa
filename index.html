@@ -760,6 +760,7 @@
       <div class="dict-column-header">Morfix<span class="heb">מורפיקס</span></div>
       <div class="status-row">
         <div class="status-line" id="status-morfix"></div>
+        <button type="button" class="link-button" id="refresh-morfix" hidden>Refresh</button>
         <button type="button" class="link-button" id="view-raw-morfix" hidden>View raw response</button>
       </div>
       <div class="dict-results" id="results-morfix">
@@ -771,6 +772,7 @@
       <div class="dict-column-header">Pealim<span class="heb">פְּעָלִים</span></div>
       <div class="status-row">
         <div class="status-line" id="status-pealim"></div>
+        <button type="button" class="link-button" id="refresh-pealim" hidden>Refresh</button>
         <button type="button" class="link-button" id="view-raw-pealim" hidden>View raw response</button>
       </div>
       <div class="dict-results" id="results-pealim">
@@ -782,6 +784,7 @@
       <div class="dict-column-header">Milog<span class="heb">מילוג</span></div>
       <div class="status-row">
         <div class="status-line" id="status-milog"></div>
+        <button type="button" class="link-button" id="refresh-milog" hidden>Refresh</button>
         <button type="button" class="link-button" id="view-raw-milog" hidden>View raw response</button>
       </div>
       <div class="dict-results" id="results-milog">
@@ -831,6 +834,24 @@
         as JSON" to save a copy (e.g. to move it to another browser or device), and "Import
         backup from JSON" to load a previously downloaded copy instead of re-crawling from
         scratch — importing merges into whatever's already cached here.
+      </div>
+    </div>
+    <div class="field">
+      <label>Search result cache</label>
+      <div class="backup-status-line" id="search-cache-status">Checking cache…</div>
+      <div class="backup-buttons">
+        <button type="button" id="search-cache-export">Export as JSON</button>
+        <button type="button" id="search-cache-import">Import JSON…</button>
+        <input type="file" id="search-cache-import-file" accept="application/json,.json" hidden>
+        <button type="button" id="search-cache-clear">Clear cache</button>
+      </div>
+      <div class="help">
+        Every Morfix/Pealim/Milog search result is stored here (with its source and the date it was
+        retrieved), so searching the same word again reuses it instead of hitting the network. A cached
+        result older than 3 months is treated as stale and automatically replaced by a fresh live lookup.
+        Each dictionary column shows a "Refresh" link when it's displaying a cached result, to force a new
+        lookup early. Use "Export as JSON" to save a copy of this cache and "Import JSON" to load one back in
+        (importing merges into whatever's already cached here).
       </div>
     </div>
     <div class="field">
@@ -923,6 +944,9 @@
     viewRawMorfix: document.getElementById("view-raw-morfix"),
     viewRawPealim: document.getElementById("view-raw-pealim"),
     viewRawMilog: document.getElementById("view-raw-milog"),
+    refreshMorfix: document.getElementById("refresh-morfix"),
+    refreshPealim: document.getElementById("refresh-pealim"),
+    refreshMilog: document.getElementById("refresh-milog"),
     resultsMorfix: document.getElementById("results-morfix"),
     resultsPealim: document.getElementById("results-pealim"),
     resultsMilog: document.getElementById("results-milog"),
@@ -944,7 +968,12 @@
     prefOfflineSearch: document.getElementById("pref-offline-search"),
     backupExport: document.getElementById("backup-export"),
     backupImport: document.getElementById("backup-import"),
-    backupImportFile: document.getElementById("backup-import-file")
+    backupImportFile: document.getElementById("backup-import-file"),
+    searchCacheStatus: document.getElementById("search-cache-status"),
+    searchCacheExport: document.getElementById("search-cache-export"),
+    searchCacheImport: document.getElementById("search-cache-import"),
+    searchCacheImportFile: document.getElementById("search-cache-import-file"),
+    searchCacheClear: document.getElementById("search-cache-clear")
   };
 
   els.firebaseKeyField.value = state.firebaseKey;
@@ -953,6 +982,7 @@
     els.firebaseKeyField.value = state.firebaseKey;
     els.dialog.showModal();
     refreshBackupStatusIdle();
+    refreshSearchCacheStatus();
   });
   els.settingsCancel.addEventListener("click", () => els.dialog.close());
   els.settingsSave.addEventListener("click", () => {
@@ -1022,12 +1052,74 @@
 
   refreshBackupStatusIdle();
 
+  // ---------- Search result cache UI ----------
+  async function refreshSearchCacheStatus() {
+    try {
+      const count = await searchCacheCount();
+      els.searchCacheStatus.textContent = count
+        ? `${count} result${count === 1 ? "" : "s"} cached.`
+        : "Nothing cached yet.";
+    } catch (e) {
+      els.searchCacheStatus.textContent = "Couldn't read the cache.";
+    }
+  }
+  refreshSearchCacheStatus();
+
+  els.searchCacheExport.addEventListener("click", async () => {
+    els.searchCacheExport.disabled = true;
+    const originalLabel = els.searchCacheExport.textContent;
+    els.searchCacheExport.textContent = "Preparing…";
+    try {
+      await exportSearchCache();
+    } catch (e) {
+      alert(`Couldn't export search cache: ${e.message}`);
+    } finally {
+      els.searchCacheExport.disabled = false;
+      els.searchCacheExport.textContent = originalLabel;
+    }
+  });
+
+  els.searchCacheImport.addEventListener("click", () => els.searchCacheImportFile.click());
+  els.searchCacheImportFile.addEventListener("change", async () => {
+    const file = els.searchCacheImportFile.files && els.searchCacheImportFile.files[0];
+    els.searchCacheImportFile.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    els.searchCacheImport.disabled = true;
+    const originalLabel = els.searchCacheImport.textContent;
+    els.searchCacheImport.textContent = "Importing…";
+    try {
+      const text = await file.text();
+      const summary = await importSearchCache(text);
+      await refreshSearchCacheStatus();
+      alert(`Imported ${summary.count} cached result${summary.count === 1 ? "" : "s"}.`);
+    } catch (e) {
+      alert(`Couldn't import search cache: ${e.message}`);
+    } finally {
+      els.searchCacheImport.disabled = false;
+      els.searchCacheImport.textContent = originalLabel;
+    }
+  });
+
+  els.searchCacheClear.addEventListener("click", async () => {
+    if (!confirm("Clear all cached search results?")) return;
+    els.searchCacheClear.disabled = true;
+    try {
+      await clearSearchCache();
+      await refreshSearchCacheStatus();
+    } catch (e) {
+      alert(`Couldn't clear search cache: ${e.message}`);
+    } finally {
+      els.searchCacheClear.disabled = false;
+    }
+  });
+
   function resetMorfixColumn() {
     state.morfix.lastResult = null;
     state.morfix.lastRaw = null;
     els.statusMorfix.textContent = "";
     els.statusMorfix.classList.remove("error");
     els.viewRawMorfix.hidden = true;
+    els.refreshMorfix.hidden = true;
     els.resultsMorfix.innerHTML = `<div class="empty-state">Search a word to see its entry.</div>`;
   }
 
@@ -1037,6 +1129,7 @@
     els.statusPealim.textContent = "";
     els.statusPealim.classList.remove("error");
     els.viewRawPealim.hidden = true;
+    els.refreshPealim.hidden = true;
     els.resultsPealim.innerHTML = `<div class="empty-state">Search a word to see its entry.</div>`;
   }
 
@@ -1046,6 +1139,7 @@
     els.statusMilog.textContent = "";
     els.statusMilog.classList.remove("error");
     els.viewRawMilog.hidden = true;
+    els.refreshMilog.hidden = true;
     els.resultsMilog.innerHTML = `<div class="empty-state">Search a word to see its entry.</div>`;
   }
 
@@ -1289,9 +1383,24 @@
     }
   }
 
-  async function doMorfixSearch(word) {
+  async function doMorfixSearch(word, { forceRefresh = false } = {}) {
     els.statusMorfix.textContent = "Searching…";
     els.statusMorfix.classList.remove("error");
+    els.refreshMorfix.hidden = true;
+
+    if (!forceRefresh) {
+      const cached = await getCachedSearchResult("morfix", word);
+      if (cached) {
+        state.morfix.lastRaw = cached.raw;
+        state.morfix.lastResult = cached.result;
+        els.viewRawMorfix.hidden = !cached.raw;
+        renderMorfix(cached.result);
+        els.statusMorfix.textContent = `cached · retrieved ${formatCacheDate(cached.retrievedAt)}`;
+        els.refreshMorfix.hidden = false;
+        return;
+      }
+    }
+
     try {
       const { data, via } = await fetchMorfix(word);
       state.morfix.lastRaw = data;
@@ -1300,6 +1409,7 @@
       state.morfix.lastResult = result;
       renderMorfix(result);
       els.statusMorfix.textContent = `via ${via}`;
+      await putCachedSearchResult("morfix", word, { result, raw: data });
     } catch (err) {
       els.statusMorfix.textContent = err.message;
       els.statusMorfix.classList.add("error");
@@ -1450,6 +1560,175 @@
   }
   async function metaSet(key, value) {
     await idbPutAll("meta", [{ key, value }]);
+  }
+
+  // ---------- Search results cache (IndexedDB) ----------
+  // Separate from the Pealim offline backup above: this caches the actual
+  // per-query results (parsed entry + raw response) from each of the three
+  // live dictionary lookups, keyed by source+word, so re-searching the same
+  // word doesn't hit the network again. A cached entry older than
+  // SEARCH_CACHE_STALE_MONTHS is treated as a miss, erased, and replaced by
+  // a fresh live fetch (which then gets cached again).
+  const SEARCH_CACHE_DB_NAME = "milon-search-cache";
+  const SEARCH_CACHE_DB_VERSION = 1;
+  const SEARCH_CACHE_STALE_MONTHS = 3;
+  let searchCacheDbPromise = null;
+
+  function openSearchCacheDb() {
+    if (searchCacheDbPromise) return searchCacheDbPromise;
+    searchCacheDbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(SEARCH_CACHE_DB_NAME, SEARCH_CACHE_DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("results")) db.createObjectStore("results", { keyPath: "key" });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return searchCacheDbPromise;
+  }
+
+  function normalizeSearchCacheQuery(word) {
+    return word.trim().toLowerCase();
+  }
+
+  function searchCacheKey(source, word) {
+    return `${source}::${normalizeSearchCacheQuery(word)}`;
+  }
+
+  function isSearchCacheStale(retrievedAt) {
+    const retrieved = new Date(retrievedAt);
+    if (isNaN(retrieved.getTime())) return true;
+    const staleBefore = new Date();
+    staleBefore.setMonth(staleBefore.getMonth() - SEARCH_CACHE_STALE_MONTHS);
+    return retrieved.getTime() < staleBefore.getTime();
+  }
+
+  // Returns the cached record ({ key, source, query, result, raw,
+  // retrievedAt }) for this source+word, or null on a miss — including a
+  // stale hit, which is deleted first so it can't be served again.
+  async function getCachedSearchResult(source, word) {
+    try {
+      const db = await openSearchCacheDb();
+      const key = searchCacheKey(source, word);
+      const record = await new Promise((resolve, reject) => {
+        const tx = db.transaction("results", "readonly");
+        const req = tx.objectStore("results").get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+      if (!record) return null;
+      if (isSearchCacheStale(record.retrievedAt)) {
+        await deleteCachedSearchResult(source, word);
+        return null;
+      }
+      return record;
+    } catch (e) {
+      return null; // IndexedDB unavailable — just treat it as a cache miss
+    }
+  }
+
+  async function putCachedSearchResult(source, word, { result, raw }) {
+    try {
+      const db = await openSearchCacheDb();
+      const record = {
+        key: searchCacheKey(source, word),
+        source,
+        query: word.trim(),
+        result,
+        raw: raw === undefined ? null : raw,
+        retrievedAt: new Date().toISOString()
+      };
+      const tx = db.transaction("results", "readwrite");
+      tx.objectStore("results").put(record);
+      await idbTxDone(tx);
+    } catch (e) { /* ignore — caching is best-effort, not critical to a search succeeding */ }
+  }
+
+  async function deleteCachedSearchResult(source, word) {
+    try {
+      const db = await openSearchCacheDb();
+      const tx = db.transaction("results", "readwrite");
+      tx.objectStore("results").delete(searchCacheKey(source, word));
+      await idbTxDone(tx);
+    } catch (e) { /* ignore */ }
+  }
+
+  async function clearSearchCache() {
+    const db = await openSearchCacheDb();
+    const tx = db.transaction("results", "readwrite");
+    tx.objectStore("results").clear();
+    await idbTxDone(tx);
+  }
+
+  async function getAllCachedSearchResults() {
+    const db = await openSearchCacheDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("results", "readonly");
+      const req = tx.objectStore("results").getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function searchCacheCount() {
+    try {
+      const db = await openSearchCacheDb();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction("results", "readonly");
+        const req = tx.objectStore("results").count();
+        req.onsuccess = () => resolve(req.result || 0);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  async function exportSearchCache() {
+    const records = await getAllCachedSearchResults();
+    if (!records.length) throw new Error("No cached search results yet — search for a few words first.");
+    const payload = { format: "milon-search-cache", version: 1, exportedAt: new Date().toISOString(), results: records };
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dictionary-search-cache-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // Imports a JSON file previously produced by exportSearchCache(). Merges
+  // into whatever's already cached (put() overwrites matching keys, adds
+  // new ones) — stale entries among the imported records will simply be
+  // treated as misses (and replaced) the next time that word is searched.
+  async function importSearchCache(jsonText) {
+    let payload;
+    try {
+      payload = JSON.parse(jsonText);
+    } catch (e) {
+      throw new Error("That file isn't valid JSON.");
+    }
+    const records = payload && Array.isArray(payload.results) ? payload.results : null;
+    if (!records) throw new Error("That file doesn't look like a search cache export.");
+    const valid = records.filter(r => r && typeof r.key === "string" && r.source && r.result);
+    if (!valid.length) throw new Error("No usable cache entries found in that file.");
+    const db = await openSearchCacheDb();
+    const tx = db.transaction("results", "readwrite");
+    const store = tx.objectStore("results");
+    valid.forEach(r => store.put(r));
+    await idbTxDone(tx);
+    return { count: valid.length };
+  }
+
+  function formatCacheDate(iso) {
+    try {
+      return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    } catch (e) {
+      return iso;
+    }
   }
 
   // Cache-busting: corsproxy.io and the other fallback proxies sometimes
@@ -2165,9 +2444,10 @@
     }
   });
 
-  async function doPealimSearch(word) {
+  async function doPealimSearch(word, { forceRefresh = false } = {}) {
     els.statusPealim.textContent = "Searching…";
     els.statusPealim.classList.remove("error");
+    els.refreshPealim.hidden = true;
 
     if (state.preferOfflineSearch) {
       try {
@@ -2189,6 +2469,19 @@
       }
     }
 
+    if (!forceRefresh) {
+      const cached = await getCachedSearchResult("pealim", word);
+      if (cached) {
+        state.pealim.lastRawHtml = cached.raw;
+        state.pealim.lastResult = cached.result;
+        els.viewRawPealim.hidden = !cached.raw;
+        renderPealim(cached.result);
+        els.statusPealim.textContent = `cached · retrieved ${formatCacheDate(cached.retrievedAt)}`;
+        els.refreshPealim.hidden = false;
+        return;
+      }
+    }
+
     try {
       const url = `https://www.pealim.com/search/?q=${encodeURIComponent(word)}`;
       const { html, via } = await fetchPealimPage(url);
@@ -2198,6 +2491,7 @@
       state.pealim.lastResult = result;
       renderPealim(result);
       els.statusPealim.textContent = `via ${via}`;
+      await putCachedSearchResult("pealim", word, { result, raw: html });
     } catch (err) {
       els.statusPealim.textContent = err.message;
       els.statusPealim.classList.add("error");
@@ -2555,9 +2849,24 @@
     });
   }
 
-  async function doMilogSearch(word) {
+  async function doMilogSearch(word, { forceRefresh = false } = {}) {
     els.statusMilog.textContent = "Searching…";
     els.statusMilog.classList.remove("error");
+    els.refreshMilog.hidden = true;
+
+    if (!forceRefresh) {
+      const cached = await getCachedSearchResult("milog", word);
+      if (cached) {
+        state.milog.lastRawHtml = cached.raw;
+        state.milog.lastResult = cached.result;
+        els.viewRawMilog.hidden = !cached.raw;
+        renderMilog(cached.result);
+        els.statusMilog.textContent = `cached · retrieved ${formatCacheDate(cached.retrievedAt)}`;
+        els.refreshMilog.hidden = false;
+        return;
+      }
+    }
+
     try {
       const url = `https://milog.co.il/${encodeURIComponent(word)}`;
       const { html, via } = await fetchMilogPage(url);
@@ -2567,6 +2876,7 @@
       state.milog.lastResult = result;
       renderMilog(result);
       els.statusMilog.textContent = `via ${via}`;
+      await putCachedSearchResult("milog", word, { result, raw: html });
     } catch (err) {
       els.statusMilog.textContent = err.message;
       els.statusMilog.classList.add("error");
@@ -2608,6 +2918,18 @@
   els.form.addEventListener("submit", e => {
     e.preventDefault();
     doSearch(els.input.value);
+  });
+
+  // "Refresh" link shown next to a cached result — forces a live re-fetch
+  // for just that one dictionary, bypassing (and then overwriting) the cache.
+  els.refreshMorfix.addEventListener("click", () => {
+    if (els.input.value.trim()) doMorfixSearch(els.input.value, { forceRefresh: true });
+  });
+  els.refreshPealim.addEventListener("click", () => {
+    if (els.input.value.trim()) doPealimSearch(els.input.value, { forceRefresh: true });
+  });
+  els.refreshMilog.addEventListener("click", () => {
+    if (els.input.value.trim()) doMilogSearch(els.input.value, { forceRefresh: true });
   });
 })();
 </script>
