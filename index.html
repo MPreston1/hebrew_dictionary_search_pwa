@@ -1374,7 +1374,7 @@
   // entry already lives at its own headword-keyed address, a query with no
   // cache entry of its own can still look up one specific word directly.
   const SEARCH_CACHE_DB_NAME = "milon-search-cache";
-  const SEARCH_CACHE_DB_VERSION = 3;
+  const SEARCH_CACHE_DB_VERSION = 4;
   const SEARCH_CACHE_STALE_MONTHS = 3;
   const SEARCH_CACHE_DEDUP_SOURCES = new Set(["morfix", "pealim", "milog"]);
   let searchCacheDbPromise = null;
@@ -1386,11 +1386,26 @@
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains("results")) db.createObjectStore("results", { keyPath: "key" });
-        if (!db.objectStoreNames.contains("entries")) db.createObjectStore("entries", { keyPath: "key" });
-        // Superseded by "entries" (which now holds the actual data a
-        // headword resolves to, not just a pointer to a query) — drop it
-        // rather than leave a second, now-pointless store behind.
+        // Superseded by "entries" — drop it rather than leave a second,
+        // now-pointless store behind.
         if (db.objectStoreNames.contains("headwords")) db.deleteObjectStore("headwords");
+        // Keyed by each entry's OWN stable identifier from its source
+        // dictionary (Pealim's dictUrl, Milog's entryUrl, Morfix's id) —
+        // never by headword text. Two genuinely different entries can be
+        // spelled identically (a noun and a name both שָׁלוֹם) or collide
+        // once nikud is stripped for matching (שָׁלוֹם vs שִׁלּוּם both
+        // reduce to ש-ל-ו-ם) — keying by text would silently merge them.
+        // The non-unique "headwordKey" index below is what a typed search
+        // query is actually looked up by; it can point at several entries.
+        let entriesStore;
+        if (!db.objectStoreNames.contains("entries")) {
+          entriesStore = db.createObjectStore("entries", { keyPath: "key" });
+        } else {
+          entriesStore = req.transaction.objectStore("entries");
+        }
+        if (!entriesStore.indexNames.contains("headwordKey")) {
+          entriesStore.createIndex("headwordKey", "headwordKey", { unique: false });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -1473,6 +1488,17 @@
     return null;
   }
 
+  // The one stable identifier each source itself assigns to a dictionary
+  // entry — never derived from the headword text, since that's exactly
+  // what two distinct entries can share (a noun and a name both spelled
+  // שָׁלוֹם; שָׁלוֹם and שִׁלּוּם collide once nikud is stripped for matching).
+  function entryUniqueId(source, data) {
+    if (source === "morfix") return data.id || "";
+    if (source === "pealim") return data.dictUrl || "";
+    if (source === "milog") return data.entryUrl || "";
+    return "";
+  }
+
   async function getEntryRecord(key) {
     try {
       const db = await openSearchCacheDb();
@@ -1484,6 +1510,25 @@
       });
     } catch (e) {
       return null;
+    }
+  }
+
+  // All entries — could be more than one — that share this source+word's
+  // normalized spelling, via the non-unique "headwordKey" index. This is
+  // what a typed search query is actually looked up by, since the query
+  // only has text to go on, not any entry's own unique dictionary ID.
+  async function getEntriesByHeadword(source, word) {
+    try {
+      const db = await openSearchCacheDb();
+      const headwordKey = `${source}::${normalizeHeadwordKey(word)}`;
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction("entries", "readonly");
+        const req = tx.objectStore("entries").index("headwordKey").getAll(headwordKey);
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      return [];
     }
   }
 
@@ -1535,15 +1580,20 @@
       const tx = db.transaction(["results", "entries"], "readwrite");
       const entriesStore = tx.objectStore("entries");
       const itemKeys = items.map((item, idx) => {
-        const normalized = normalizeHeadwordKey(item.headword);
-        // An entry with no usable headword text can't be deduped by word,
-        // so it gets a key scoped to this one query instead — still
-        // stored correctly, just not shared or reachable by the
-        // partial-match fallback.
-        const key = normalized
-          ? `${source}::${normalized}`
-          : `${source}::__noheadword::${normalizeSearchCacheQuery(word)}::${idx}`;
-        entriesStore.put({ key, source, headword: item.headword, kind: item.kind, data: item.data, retrievedAt, sourceQuery: word.trim() });
+        const uid = entryUniqueId(source, item.data);
+        // An entry with no ID the source itself gave us can't be reliably
+        // deduped/shared, so it's scoped to this one query instead — still
+        // stored and rendered correctly, just not shared with other
+        // queries or reachable by the partial-match fallback.
+        const key = uid
+          ? `${source}::id::${uid}`
+          : `${source}::__noid::${normalizeSearchCacheQuery(word)}::${idx}`;
+        const normalizedHeadword = normalizeHeadwordKey(item.headword);
+        entriesStore.put({
+          key, source, headword: item.headword,
+          headwordKey: normalizedHeadword ? `${source}::${normalizedHeadword}` : null,
+          kind: item.kind, data: item.data, retrievedAt, sourceQuery: word.trim()
+        });
         return key;
       });
       tx.objectStore("results").put({
@@ -1616,7 +1666,7 @@
     const records = await getAllCachedSearchResults();
     if (!records.length) throw new Error("No cached search results yet — search for a few words first.");
     const entries = await getAllEntryRecords().catch(() => []);
-    const payload = { format: "milon-search-cache", version: 3, exportedAt: new Date().toISOString(), results: records, entries };
+    const payload = { format: "milon-search-cache", version: 4, exportedAt: new Date().toISOString(), results: records, entries };
     const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1657,7 +1707,7 @@
     if (!valid.length) throw new Error("No usable cache entries found in that file.");
     const entryRecords = Array.isArray(payload.entries) ? payload.entries : [];
     const validEntries = entryRecords.filter(r => r && typeof r.key === "string" && r.source && r.data !== undefined)
-      .map(({ key, source, headword, kind, data, retrievedAt, sourceQuery }) => ({ key, source, headword, kind, data, retrievedAt, sourceQuery }));
+      .map(({ key, source, headword, headwordKey, kind, data, retrievedAt, sourceQuery }) => ({ key, source, headword, headwordKey, kind, data, retrievedAt, sourceQuery }));
     const db = await openSearchCacheDb();
     const tx = db.transaction(["results", "entries"], "readwrite");
     const store = tx.objectStore("results");
@@ -1689,19 +1739,24 @@
   // including one that legitimately found nothing.
   async function tryHeadwordFallback(source, word) {
     if (!SEARCH_CACHE_DEDUP_SOURCES.has(source)) return null;
-    const key = `${source}::${normalizeHeadwordKey(word)}`;
-    const entry = await getEntryRecord(key);
-    if (!entry || isSearchCacheStale(entry.retrievedAt)) return null;
+    // Deliberately ALL entries sharing this spelling, not just one — the
+    // whole reason entries are keyed by their own dictionary ID rather
+    // than by headword text is that more than one genuinely distinct entry
+    // (a noun and a name spelled the same; two words that differ only in
+    // nikud) can share a single normalized headword.
+    const entries = (await getEntriesByHeadword(source, word)).filter(e => !isSearchCacheStale(e.retrievedAt));
+    if (!entries.length) return null;
     // Rendering each source's result needs certain top-level fields to be
     // present and truthy (Morfix's "matched", Milog's "found") — supply
-    // sensible defaults here since there's no parent query to pull them
-    // from when serving a single entry standalone.
+    // sensible defaults here since there's no single parent query to pull
+    // them from when assembling a standalone partial result.
     const extra = source === "morfix" ? { query: word, matched: true, corrections: [] }
       : source === "milog" ? { query: word, found: true }
       : {};
-    const result = recomposeResult(source, extra, [entry]);
+    const result = recomposeResult(source, extra, entries);
     if (!result) return null;
-    return { result, query: entry.sourceQuery || entry.headword, retrievedAt: entry.retrievedAt };
+    const newest = entries.reduce((a, b) => (new Date(b.retrievedAt) > new Date(a.retrievedAt) ? b : a));
+    return { result, query: newest.sourceQuery || newest.headword, retrievedAt: newest.retrievedAt };
   }
 
   function parsePealimSearchHtml(html) {
