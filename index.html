@@ -103,6 +103,20 @@
   }
   input[type="text"]:dir(rtl) { text-align: right; }
 
+  button.kb-toggle {
+    font-family: var(--font-body);
+    font-weight: 600;
+    min-width: 52px;
+    background: var(--paper-card);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  button.kb-toggle:hover { background: var(--brass-dim); }
+  button.kb-toggle[aria-pressed="true"] { background: var(--ink); color: var(--paper-card); border-color: var(--ink); }
+
   button.go {
     font-family: var(--font-body);
     font-weight: 600;
@@ -731,7 +745,8 @@
   </header>
 
   <form class="search-row" id="search-form">
-    <input type="text" id="search-input" placeholder="Type a Hebrew or English word…" autocomplete="off" autofocus />
+    <input type="text" id="search-input" dir="auto" placeholder="Type a Hebrew or English word…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" autofocus />
+    <button class="kb-toggle" type="button" id="kb-toggle" aria-pressed="false" title="Type Hebrew on an English keyboard (Israeli layout)">EN</button>
     <button class="go" type="submit" id="go-button">Search</button>
   </form>
 
@@ -2746,6 +2761,50 @@
     await Promise.allSettled(tasks);
     els.goButton.disabled = false;
   }
+
+  // ---------- English-keyboard -> Hebrew (Israeli SI-1452 layout) ----------
+  const HEB_KEYMAP = {
+    q: "/", w: "'", e: "ק", r: "ר", t: "א", y: "ט", u: "ו", i: "ן", o: "ם", p: "פ",
+    a: "ש", s: "ד", d: "ג", f: "כ", g: "ע", h: "י", j: "ח", k: "ל", l: "ך", ";": "ף", "'": ",",
+    z: "ז", x: "ס", c: "ב", v: "ה", b: "נ", n: "מ", m: "צ", ",": "ת", ".": "ץ", "/": ".",
+    "`": ";"
+  };
+  const kbToggle = document.getElementById("kb-toggle");
+  let hebrewTyping = false;
+  try { hebrewTyping = localStorage.getItem("hebrewTyping") === "1"; } catch (e) {}
+
+  function renderKbToggle() {
+    kbToggle.textContent = hebrewTyping ? "עב" : "EN";
+    kbToggle.setAttribute("aria-pressed", String(hebrewTyping));
+    kbToggle.title = hebrewTyping
+      ? "Typing Hebrew from an English keyboard — click to switch off"
+      : "Type Hebrew on an English keyboard (Israeli layout)";
+  }
+  renderKbToggle();
+
+  kbToggle.addEventListener("click", () => {
+    hebrewTyping = !hebrewTyping;
+    try { localStorage.setItem("hebrewTyping", hebrewTyping ? "1" : "0"); } catch (e) {}
+    renderKbToggle();
+    els.input.focus();
+  });
+
+  function toHebrewKeys(text) {
+    return Array.from(text).map(ch => HEB_KEYMAP[ch.toLowerCase()] ?? ch).join("");
+  }
+
+  els.input.addEventListener("beforeinput", e => {
+    if (!hebrewTyping || e.isComposing) return;
+    if (e.inputType !== "insertText" && e.inputType !== "insertFromPaste") return;
+    const raw = e.data ?? (e.dataTransfer ? e.dataTransfer.getData("text/plain") : "");
+    if (!raw) return;
+    const converted = toHebrewKeys(raw);
+    if (converted === raw) return;
+    e.preventDefault();
+    const el = els.input;
+    el.setRangeText(converted, el.selectionStart, el.selectionEnd, "end");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 
   els.form.addEventListener("submit", e => {
     e.preventDefault();
