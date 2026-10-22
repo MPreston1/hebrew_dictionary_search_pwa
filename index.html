@@ -746,7 +746,7 @@
 
   <form class="search-row" id="search-form">
     <input type="text" id="search-input" dir="auto" placeholder="Type a Hebrew or English word…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" autofocus />
-    <button class="kb-toggle" type="button" id="kb-toggle" aria-pressed="false" title="Type Hebrew on an English keyboard (Israeli layout)">EN</button>
+    <button class="kb-toggle" type="button" id="kb-toggle" aria-pressed="false" title="Type Hebrew on an English keyboard (Israeli layout). Shortcut: type ~ to toggle">EN</button>
     <button class="go" type="submit" id="go-button">Search</button>
   </form>
 
@@ -2777,15 +2777,19 @@
     kbToggle.textContent = hebrewTyping ? "עב" : "EN";
     kbToggle.setAttribute("aria-pressed", String(hebrewTyping));
     kbToggle.title = hebrewTyping
-      ? "Typing Hebrew from an English keyboard — click to switch off"
-      : "Type Hebrew on an English keyboard (Israeli layout)";
+      ? "Typing Hebrew from an English keyboard — click or type ~ to switch off"
+      : "Type Hebrew on an English keyboard (Israeli layout) — click or type ~ to switch on";
   }
   renderKbToggle();
 
-  kbToggle.addEventListener("click", () => {
+  function toggleHebrewTyping() {
     hebrewTyping = !hebrewTyping;
     try { localStorage.setItem("hebrewTyping", hebrewTyping ? "1" : "0"); } catch (e) {}
     renderKbToggle();
+  }
+
+  kbToggle.addEventListener("click", () => {
+    toggleHebrewTyping();
     els.input.focus();
   });
 
@@ -2794,6 +2798,12 @@
   }
 
   els.input.addEventListener("beforeinput", e => {
+    // "~" (Shift + backtick) flips between English and Hebrew typing; the character itself is not inserted
+    if (e.inputType === "insertText" && e.data === "~") {
+      e.preventDefault();
+      toggleHebrewTyping();
+      return;
+    }
     if (!hebrewTyping || e.isComposing) return;
     if (e.inputType !== "insertText" && e.inputType !== "insertFromPaste") return;
     const raw = e.data ?? (e.dataTransfer ? e.dataTransfer.getData("text/plain") : "");
